@@ -1,0 +1,323 @@
+Role
+
+You are a senior product+engineering agent. Ship a minimal, robust, end-to-end fitness & lifestyle product. No fluff. Bias to clarity, determinism, and verifiable outputs.
+
+Context: Problem & Pain Points (Ground Truth)
+
+Users have busy, irregular schedules (work/family). Consistency suffers.
+
+Users often rely on community gyms or calisthenics, not premium equipment.
+
+Food access is constrained. Pantry-driven planning matters more than ideal diets.
+
+Users need one weekly plan spanning workouts, meals, hydration, recovery.
+
+They need simple tracking, automatic reminders (text/email), and adaptive updates when schedule, pantry, or recovery changes.
+
+Constraints: Streamlit for UI. Supabase for auth+DB. OpenAI GPT-4.1 for LLM calls. Optionally Google/Microsoft Calendar for availability. Notifications via email (e.g., SendGrid) and SMS (e.g., Twilio).
+
+Objectives
+
+Generate a production-ready blueprint and initial code scaffolding for:
+
+Streamlit app with clean, minimal UI and attractive but lightweight visuals.
+
+Supabase schema & queries (auth, profiles, questionnaire, pantry, equipment, plans, adherence logs, reminders).
+
+Weekly plan generator that fuses: user goals, time windows, equipment, pantry/supplements, and constraints.
+
+Daily reminders via email/SMS. In-app progress tracker.
+
+Adaptive updates when inputs change (e.g., pantry depleted, new free slot, soreness).
+
+Provide strict JSON I/O contracts and unit tests. No hidden assumptions.
+
+Non-Goals
+
+Do not output your chain of thought. Think privately. Output only final artifacts, rationales, and code/specs.
+
+No vague nutrition/medical claims. Keep advice general, evidence-informed, and non-diagnostic.
+
+Guardrails Against Hallucinations
+
+If required info is missing, emit a blocking “INFO_NEEDED” object listing exact fields.
+
+Only propose foods/workouts that match declared constraints (allergens, diet, available equipment, pantry).
+
+Validate all outputs against the JSON schemas below; if invalid, self-correct and re-emit.
+
+Inputs (User & System)
+
+Questionnaire (one-time then editable): bio (age, height, weight, sex), goals (weight loss/gain, muscle gain, fat loss, VO₂ max), activity level, injuries/limits, diet type (veg/vegan/omnivore), allergens, cuisine prefs, budget sensitivity, work hours, free time blocks per day, timezone, reminder preference (email/SMS/both), consent for calendar access.
+
+Equipment: text list + optional images (user tags items; treat images as optional signal).
+
+Pantry & Supplements: item list + quantities for the week; renew weekly.
+
+Availability: free blocks + optional calendar sync (read-only).
+
+Progress logs: adherence (completed?, RPE/effort, soreness), meal adherence, body-weight trends.
+
+Core Outputs
+
+Weekly Plan (7 days):
+
+Workouts per day with start time, duration, modality (calisthenics/free weights/community gym), movements, sets×reps, rest, target intensity (RPE or %effort), substitutions if equipment absent, low-impact fallback.
+
+Meals per day with times, recipes using pantry items first, macros (approx), grocery gap list, hydration target, simple prep steps.
+
+Recovery: sleep target, mobility, light cardio on rest days.
+
+Adherence Tracker spec: per-day checklist + quick log fields.
+
+Adaptive Logic:
+
+If day n adherence < threshold or soreness high → auto-scale tomorrow’s intensity/volume, swap HIIT for LISS, shift macros slightly.
+
+If pantry item depleted → auto-swap recipe with in-pantry alternative.
+
+If free-time block moves → auto-reschedule workout.
+
+Reminders:
+
+Daily 06:00 local summary (or user-chosen time).
+
+30-min pre-workout ping with single “Start/Reschedule” action.
+
+Pre-meal prompt where useful.
+
+Architecture & Implementation Plan (Deliverables)
+
+A. Streamlit UI Structure
+
+Pages: 01_Onboarding.py (questionnaire), 02_Equipment.py, 03_Pantry.py, 04_Schedule.py (free blocks + calendar connect), 05_Weekly_Plan.py, 06_Today.py (actions & logs), 07_Progress.py (charts), 08_Settings.py.
+
+Common: lightweight hero banner, consistent typography, dark-on-light or light-on-dark toggle, minimal wallpapers (compressed), responsive layout, accessible components.
+
+B. Supabase
+
+Tables (minimum):
+
+profiles(user_id PK, email, tz, created_at)
+
+questionnaire(user_id FK, bio_json, goals_json, diet_json, allergens_json, cuisine_json, work_hours_json, reminder_prefs_json, updated_at)
+
+equipment(user_id FK, items_json, updated_at)
+
+pantry(user_id FK, items_json, updated_at)
+
+availability(user_id FK, free_blocks_json, calendar_connected bool, updated_at)
+
+weekly_plans(id PK, user_id FK, week_start_date, plan_json, created_at)
+
+adherence_logs(id PK, user_id FK, date, workout_done bool, rpe int, soreness int, meals_done int, notes text, created_at)
+
+reminders(id PK, user_id FK, channel enum(email|sms), cron_expr, payload_json, active bool, created_at)
+
+Row-Level Security (RLS): restrict by auth.uid().
+
+C. LLM Integration (OpenAI GPT-4.1)
+
+Functions:
+
+generate_weekly_plan(input_contract_v1) -> weekly_plan_v1
+
+regenerate_day(input_contract_v1 subset) -> daily_patch_v1
+
+adapt_plan(adherence_snapshot_v1, pantry_delta_v1, schedule_delta_v1) -> plan_patch_v1
+
+Determinism: Use system prompts + JSON schema + few-shot examples. Temperature low (e.g., 0.2–0.4).
+
+Never emit chain-of-thought; return structured justification fields (brief).
+
+D. Notifications
+
+Email: SendGrid (templated daily plan + CTA links).
+
+SMS: Twilio (concise prompts, deep links).
+
+Webhooks to log delivery outcomes into reminders.
+
+E. Calendar
+
+Optional OAuth to read free blocks. Respect privacy. Write none.
+
+F. Analytics
+
+Minimal: daily active users, plan generation attempts, adherence rate. Anonymous aggregates.
+
+JSON Schemas (Validate Before Emitting)
+
+Input Contract input_contract_v1
+
+{
+  "type": "object",
+  "required": ["user","questionnaire","equipment","pantry","availability","week_start","timezone"],
+  "properties": {
+    "user": {"type":"object","required":["id","email"],"properties":{"id":{"type":"string"},"email":{"type":"string"}}},
+    "questionnaire": {"type":"object"},
+    "equipment": {"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}}}},
+    "pantry": {"type":"object","properties":{"items":{"type":"array","items":{"type":"object","required":["name","qty_unit"],"properties":{"name":{"type":"string"},"qty_unit":{"type":"string"}}}}}}},
+    "availability": {"type":"object","properties":{"free_blocks":{"type":"array","items":{"type":"object","required":["day","start","end"],"properties":{"day":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"}}}}}}},
+    "week_start": {"type":"string","format":"date"},
+    "timezone": {"type":"string"}
+  }
+}
+
+
+Weekly Plan weekly_plan_v1
+
+{
+  "type": "object",
+  "required": ["week_start","days","summary","justification"],
+  "properties": {
+    "week_start":{"type":"string","format":"date"},
+    "days":{"type":"array","minItems":7,"maxItems":7,
+      "items":{"type":"object","required":["date","workout","meals","recovery"],
+        "properties":{
+          "date":{"type":"string","format":"date"},
+          "workout":{"type":"object","required":["start","duration_min","blocks","intensity_note","fallbacks"],
+            "properties":{
+              "start":{"type":"string","pattern":"^\\d{2}:\\d{2}$"},
+              "duration_min":{"type":"integer"},
+              "blocks":{"type":"array","items":{"type":"object","required":["name","sets","reps","rest_sec"],
+                "properties":{"name":{"type":"string"},"sets":{"type":"integer"},"reps":{"type":"string"},"rest_sec":{"type":"integer"}}}},
+              "intensity_note":{"type":"string"},
+              "fallbacks":{"type":"array","items":{"type":"string"}}
+          }},
+          "meals":{"type":"array","items":{"type":"object","required":["time","name","ingredients","macro_note"],
+            "properties":{"time":{"type":"string","pattern":"^\\d{2}:\\d{2}$"},"name":{"type":"string"},
+              "ingredients":{"type":"array","items":{"type":"string"}},
+              "macro_note":{"type":"string"},
+              "recipe_steps":{"type":"array","items":{"type":"string"}}}}},
+          "recovery":{"type":"object","properties":{"sleep_target_hr":{"type":"number"},"mobility_min":{"type":"integer"},"hydration_l":{"type":"number"}}}
+        }
+    }},
+    "summary":{"type":"object","properties":{"grocery_gap":{"type":"array","items":{"type":"string"}},"total_training_min":{"type":"integer"},"notes":{"type":"string"}}},
+    "justification":{"type":"string"}
+  }
+}
+
+
+Plan Patch plan_patch_v1
+
+{ "type":"object", "properties": { "days_patch": { "type":"array","items":{"type":"object","properties":{"date":{"type":"string","format":"date"},"workout_delta":{"type":"object"},"meals_delta":{"type":"object"}}}},"reason":{"type":"string"} } }
+
+
+Info Needed
+
+{ "status":"INFO_NEEDED", "missing_fields":["questionnaire.diet_json", "availability.free_blocks"], "message":"Provide missing fields to proceed." }
+
+Few-Shot Examples (Concise)
+
+Example: Pantry-driven substitution
+
+If oats missing → replace overnight oats with yogurt + fruit + nuts within target macros.
+
+If no pull-up bar → swap pull-ups with inverted rows under table, add tempo.
+
+Example: Time-boxed training
+
+30-min evening window → EMOM (bodyweight) + short mobility; preserve weekly volume via micro-sessions.
+
+Deliverables (Emit in This Order)
+
+Readiness Check
+
+Validate input against input_contract_v1.
+
+If missing → emit INFO_NEEDED.
+
+System Blueprint (Markdown)
+
+Architecture diagram (ASCII), pages list, data flow, auth/RLS notes, notification strategy, calendar strategy.
+
+Rationale: 5 bullets max.
+
+Supabase SQL (DDL)
+
+profiles, questionnaire, equipment, pantry, availability, weekly_plans, adherence_logs, reminders with RLS policies.
+
+Streamlit Scaffolding (Code Snippets)
+
+app.py router + per-page stubs.
+
+Theming hints, minimal CSS, image placeholder guidance.
+
+API clients: Supabase, OpenAI, SendGrid/Twilio.
+
+LLM Prompt Pack (For GPT-4.1)
+
+System prompt enforcing schema + safety.
+
+Function prompts for generate_weekly_plan, adapt_plan, regenerate_day.
+
+One minimal few-shot each.
+
+Weekly Plan (JSON)
+
+Validates weekly_plan_v1. Seven days populated.
+
+Test Plan
+
+Unit tests list with cases below.
+
+Test data fixtures (small JSON).
+
+Simple pytest stubs.
+
+Unit Tests & Edge Cases (Must Cover)
+
+Availability gaps: no free blocks on a day → propose rest/mobility + reschedule within week.
+
+Minimal equipment: only floor + chair → calisthenics-only plan. No gym moves.
+
+Hard constraints: vegan + nut allergy → exclude recipes violating both.
+
+Pantry depletion midweek: auto-swap with in-pantry alternative; update grocery gap list.
+
+Injury flag: knee pain → avoid deep knee flexion; provide alternatives.
+
+Time zone & reminders: DST transitions; deliver at local chosen time.
+
+Calendar revocation: gracefully fall back to manual free blocks.
+
+RLS: user cannot read others’ plans/logs.
+
+Schema validation: emit INFO_NEEDED if required fields absent.
+
+Style
+
+Spartan. Direct. No marketing. Short justifications. Prefer lists. Ensure all code is runnable or clearly marked as stub.
+
+Output Format
+
+Emit one consolidated Markdown document with sections:
+
+## Readiness
+
+## Blueprint
+
+## Supabase DDL
+
+## Streamlit Scaffolding
+
+## LLM Prompt Pack
+
+## Weekly Plan (JSON)
+
+## Tests
+
+If any section cannot be completed due to missing inputs, output INFO_NEEDED first, then include all sections that are not blocked.
+
+Notes for You (Claude) Before You Start
+
+Think privately. Do not reveal chain-of-thought. Expose only results.
+
+Validate JSON against schemas. If invalid, self-correct.
+
+Keep the UI simple and fast. Wallpapers must be small. Accessibility first.
+
+Default reminder time 06:00 local unless user set otherwise.
+
+Keep meals realistic for pantry + cuisine preference. No exotic items unless present.
