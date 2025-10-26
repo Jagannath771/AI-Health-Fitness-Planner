@@ -89,6 +89,12 @@ if st.button("🤖 Generate Weekly Plan", type="primary", use_container_width=Tr
             st.json(plan)
         elif "status" in plan and plan["status"] == "ERROR":
             st.error(f"❌ Error: {plan['message']}")
+            # Show more details for debugging
+            with st.expander("🔍 Debug Information"):
+                st.write("**Input data sent to API:**")
+                st.json(input_data)
+                st.write("**Full error response:**")
+                st.json(plan)
         else:
             new_plan = WeeklyPlan(
                 user_id=st.session_state.user_id,

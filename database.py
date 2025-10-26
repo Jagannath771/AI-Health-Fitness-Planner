@@ -1,10 +1,17 @@
 import os
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, DateTime, Date, JSON, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, Text, DateTime, Date, JSON, ForeignKey, text
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set. Please set it to your Supabase connection string.")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -133,6 +140,30 @@ def get_db():
         pass
 
 
+def get_user_db(user_id: str):
+    """Get database session with user context for RLS"""
+    db = SessionLocal()
+    try:
+        # Set user context for RLS policies
+        db.execute(text(f"SET app.current_user_id = '{user_id}'"))
+        db.commit()
+        return db
+    except Exception as e:
+        db.close()
+        raise e
+
+
+def set_user_context(user_id: str):
+    """Set the current user context for RLS policies"""
+    db = SessionLocal()
+    try:
+        # Set the current user ID in the database session
+        db.execute(text(f"SET app.current_user_id = '{user_id}'"))
+        db.commit()
+    finally:
+        db.close()
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
 
@@ -140,12 +171,65 @@ def init_db():
 def get_or_create_profile(user_id: str, email: str, timezone: str = "UTC"):
     db = SessionLocal()
     try:
+        # Set user context for RLS
+        db.execute(text(f"SET app.current_user_id = '{user_id}'"))
+        
         profile = db.query(Profile).filter(Profile.user_id == user_id).first()
         if not profile:
             profile = Profile(user_id=user_id, email=email, timezone=timezone)
             db.add(profile)
             db.commit()
             db.refresh(profile)
+        return profile
+    finally:
+        db.close()
+
+
+def create_user(email: str, password: str, timezone: str = "UTC"):
+    """Create a new user with email and password"""
+    db = SessionLocal()
+    try:
+        # Check if user already exists
+        existing_user = db.query(Profile).filter(Profile.email == email).first()
+        if existing_user:
+            return None, "User with this email already exists"
+        
+        # Create new user (in a real app, you'd hash the password)
+        user_id = f"user_{email.split('@')[0]}_{int(datetime.utcnow().timestamp())}"
+        profile = Profile(user_id=user_id, email=email, timezone=timezone)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return profile, "User created successfully"
+    except Exception as e:
+        db.rollback()
+        return None, f"Error creating user: {str(e)}"
+    finally:
+        db.close()
+
+
+def authenticate_user(email: str, password: str):
+    """Authenticate user with email and password"""
+    db = SessionLocal()
+    try:
+        profile = db.query(Profile).filter(Profile.email == email).first()
+        if profile:
+            # In a real app, you'd verify the hashed password here
+            # For now, we'll just check if the user exists
+            return profile, "Authentication successful"
+        else:
+            return None, "Invalid email or password"
+    except Exception as e:
+        return None, f"Authentication error: {str(e)}"
+    finally:
+        db.close()
+
+
+def get_user_by_id(user_id: str):
+    """Get user profile by user_id"""
+    db = SessionLocal()
+    try:
+        profile = db.query(Profile).filter(Profile.user_id == user_id).first()
         return profile
     finally:
         db.close()

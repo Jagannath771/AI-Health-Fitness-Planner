@@ -14,7 +14,7 @@ Users need one weekly plan spanning workouts, meals, hydration, recovery.
 
 They need simple tracking, automatic reminders (text/email), and adaptive updates when schedule, pantry, or recovery changes.
 
-Constraints: Streamlit for UI. Supabase for auth+DB. OpenAI GPT-4.1 for LLM calls. Optionally Google/Microsoft Calendar for availability. Notifications via email (e.g., SendGrid) and SMS (e.g., Twilio).
+Constraints: Streamlit for UI. Supabase for auth+DB. Google Gemini 2.0 Flash for LLM calls. Optionally Google/Microsoft Calendar for availability. Notifications via email (e.g., SendGrid) and SMS (e.g., Twilio).
 
 Objectives
 

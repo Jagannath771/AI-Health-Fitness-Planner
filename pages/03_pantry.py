@@ -91,10 +91,14 @@ with col2:
 with col3:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("➕ Add Item", use_container_width=True):
-        if item_name and qty_unit:
-            new_item = {"name": item_name, "qty_unit": qty_unit}
+        # Use selected_common if it's not empty, otherwise use the custom input
+        final_item_name = selected_common if selected_common else item_name
+        if final_item_name.strip() and qty_unit.strip():
+            new_item = {"name": final_item_name.strip(), "qty_unit": qty_unit.strip()}
             st.session_state.pantry_items.append(new_item)
             st.rerun()
+        else:
+            st.error("Please enter both item name and quantity/unit")
 
 st.markdown("---")
 

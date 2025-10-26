@@ -108,7 +108,11 @@ def check_pantry_depletion(user_id):
 
 
 def suggest_meal_swap(missing_ingredient, available_items, meal_context):
-    from openai_service import openai
+    import google.generativeai as genai
+    import os
+    
+    GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+    genai.configure(api_key=GOOGLE_API_KEY)
     
     system_prompt = """You are a nutrition expert. Suggest a recipe swap that uses available pantry items 
     while maintaining similar macros and meal type (breakfast/lunch/dinner)."""
@@ -120,17 +124,30 @@ Original meal context: {meal_context}
 Suggest a suitable replacement ingredient or alternative meal using available items."""
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-5",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            max_completion_tokens=1024
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Combine system and user prompts for Gemini
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=1024,
+                temperature=0.7
+            )
         )
         
-        return json.loads(response.choices[0].message.content)
+        # Clean the response text - remove markdown code blocks if present
+        response_text = response.text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]  # Remove ```json
+        if response_text.startswith("```"):
+            response_text = response_text[3:]  # Remove ```
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]  # Remove trailing ```
+        response_text = response_text.strip()
+        
+        return json.loads(response_text)
     
     except Exception as e:
         return {"error": str(e)}

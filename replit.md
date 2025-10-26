@@ -2,7 +2,7 @@
 
 ## Overview
 
-FitLife Planner is an AI-powered fitness and lifestyle planning application that generates personalized weekly workout and meal plans based on user constraints, preferences, and available resources. The application adapts dynamically to user adherence, pantry availability, recovery metrics, and schedule changes. It leverages OpenAI's GPT-4 to create contextual, constraint-aware plans that respect equipment limitations, dietary restrictions, and time availability.
+FitLife Planner is an AI-powered fitness and lifestyle planning application that generates personalized weekly workout and meal plans based on user constraints, preferences, and available resources. The application adapts dynamically to user adherence, pantry availability, recovery metrics, and schedule changes. It leverages Google's Gemini 2.0 Flash to create contextual, constraint-aware plans that respect equipment limitations, dietary restrictions, and time availability.
 
 The system collects user data through a structured onboarding flow, tracks daily adherence with subjective metrics (RPE, soreness), and triggers adaptive re-planning when conditions warrant intervention.
 
@@ -41,7 +41,7 @@ Preferred communication style: Simple, everyday language.
 **Relationships**: One-to-one for questionnaire/equipment/pantry/availability, one-to-many for plans/logs/reminders
 
 ### AI Planning System
-**Technology**: OpenAI GPT-4.1  
+**Technology**: Google Gemini 2.0 Flash  
 **Design Pattern**: Schema-driven prompt engineering with strict I/O contracts  
 **Rationale**: LLM generates holistic weekly plans that fuse multiple constraint dimensions (time, equipment, pantry, goals, recovery needs) which would be complex to hard-code algorithmically.
 

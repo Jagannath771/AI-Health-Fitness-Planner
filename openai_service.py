@@ -1,11 +1,15 @@
 import json
 import os
-from openai import OpenAI
+import google.generativeai as genai
 from datetime import datetime, timedelta
 import jsonschema
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-openai = OpenAI(api_key=OPENAI_API_KEY)
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY environment variable is not set. Please set it to your Google AI API key.")
+
+genai.configure(api_key=GOOGLE_API_KEY)
 
 INPUT_CONTRACT_V1 = {
     "type": "object",
@@ -97,6 +101,208 @@ WEEKLY_PLAN_V1 = {
 }
 
 
+def clean_json_response(response_text):
+    """Clean markdown formatting from API response text"""
+    response_text = response_text.strip()
+    if response_text.startswith("```json"):
+        response_text = response_text[7:]  # Remove ```json
+    if response_text.startswith("```"):
+        response_text = response_text[3:]  # Remove ```
+    if response_text.endswith("```"):
+        response_text = response_text[:-3]  # Remove trailing ```
+    return response_text.strip()
+
+
+def transform_api_response(plan):
+    """Transform API response to match our expected schema"""
+    # Handle nested structure
+    if "weekly_plan" in plan:
+        plan = plan["weekly_plan"]
+    
+    # Fix field name mapping
+    if "start_date" in plan and "week_start" not in plan:
+        plan["week_start"] = plan["start_date"]
+    
+    # Transform days structure
+    if "days" in plan:
+        for i, day in enumerate(plan["days"]):
+            # Fix date field - convert day name to actual date or add missing date
+            if "date" not in day:
+                if "day" in day:
+                    # Calculate the actual date based on week_start and day index
+                    try:
+                        week_start_str = plan.get("week_start", "2025-10-20")
+                        week_start = datetime.strptime(week_start_str, "%Y-%m-%d")
+                        day_date = week_start + timedelta(days=i)
+                        day["date"] = day_date.strftime("%Y-%m-%d")
+                    except Exception as e:
+                        # Fallback to a default date
+                        print(f"Date calculation error: {e}")
+                        day["date"] = f"2025-10-{20 + i}"
+                else:
+                    # No day field either, create a default date
+                    try:
+                        week_start_str = plan.get("week_start", "2025-10-20")
+                        week_start = datetime.strptime(week_start_str, "%Y-%m-%d")
+                        day_date = week_start + timedelta(days=i)
+                        day["date"] = day_date.strftime("%Y-%m-%d")
+                    except:
+                        day["date"] = f"2025-10-{20 + i}"
+            
+            # Transform workout structure
+            if "workout" in day:
+                workout = day["workout"]
+                # Convert exercises to blocks format
+                if "exercises" in workout and "blocks" not in workout:
+                    blocks = []
+                    for exercise in workout["exercises"]:
+                        block = {
+                            "name": exercise["name"],
+                            "sets": exercise["sets"],
+                            "reps": str(exercise["reps"]),
+                            "rest_sec": 60  # Default rest time
+                        }
+                        blocks.append(block)
+                    workout["blocks"] = blocks
+                
+                # Ensure blocks have correct data types
+                if "blocks" in workout:
+                    for block in workout["blocks"]:
+                        if "reps" in block and not isinstance(block["reps"], str):
+                            block["reps"] = str(block["reps"])
+                        if "sets" in block and not isinstance(block["sets"], int):
+                            try:
+                                block["sets"] = int(block["sets"])
+                            except:
+                                block["sets"] = 3  # Default
+                        if "rest_sec" in block and not isinstance(block["rest_sec"], int):
+                            try:
+                                block["rest_sec"] = int(block["rest_sec"])
+                            except:
+                                block["rest_sec"] = 60  # Default
+                
+                # Add missing required fields and ensure correct types
+                if "start" not in workout:
+                    workout["start"] = "18:00"  # Default time
+                if "duration_min" not in workout:
+                    workout["duration_min"] = 60  # Default duration
+                elif not isinstance(workout["duration_min"], int):
+                    try:
+                        workout["duration_min"] = int(workout["duration_min"])
+                    except:
+                        workout["duration_min"] = 60
+                if "intensity_note" not in workout:
+                    workout["intensity_note"] = "Moderate intensity"
+                elif not isinstance(workout["intensity_note"], str):
+                    workout["intensity_note"] = str(workout["intensity_note"])
+                if "fallbacks" not in workout:
+                    workout["fallbacks"] = []
+                elif isinstance(workout["fallbacks"], str):
+                    # Convert string fallbacks to array
+                    workout["fallbacks"] = [workout["fallbacks"]]
+                elif not isinstance(workout["fallbacks"], list):
+                    # Ensure fallbacks is always an array
+                    workout["fallbacks"] = []
+            
+            # Transform meals structure
+            if "meals" in day:
+                for meal in day["meals"]:
+                    # Convert ingredients from objects to strings
+                    if "ingredients" in meal:
+                        ingredients = meal["ingredients"]
+                        if isinstance(ingredients, list) and len(ingredients) > 0:
+                            if isinstance(ingredients[0], dict):
+                                # Convert from object format to string format
+                                ingredient_strings = []
+                                for ing in ingredients:
+                                    if "name" in ing:
+                                        qty = ing.get("qty", "1")
+                                        unit = ing.get("unit", "")
+                                        if unit:
+                                            ingredient_strings.append(f"{ing['name']} ({qty} {unit})")
+                                        else:
+                                            ingredient_strings.append(ing['name'])
+                                meal["ingredients"] = ingredient_strings
+                    
+                    # Add missing required fields
+                    if "time" not in meal:
+                        meal["time"] = "Breakfast"  # Default time
+                    if "macro_note" not in meal:
+                        meal["macro_note"] = "Balanced macros"
+                    
+                    # Ensure ingredients is always an array
+                    if "ingredients" not in meal:
+                        meal["ingredients"] = []
+                    elif isinstance(meal["ingredients"], str):
+                        meal["ingredients"] = [meal["ingredients"]]
+                    elif not isinstance(meal["ingredients"], list):
+                        meal["ingredients"] = []
+            
+            # Transform recovery structure
+            if "recovery" in day:
+                recovery = day["recovery"]
+                if "sleep_hours" in recovery and "sleep_target_hr" not in recovery:
+                    recovery["sleep_target_hr"] = recovery["sleep_hours"]
+                if "hydration_liters" in recovery and "hydration_l" not in recovery:
+                    recovery["hydration_l"] = recovery["hydration_liters"]
+                if "mobility_min" not in recovery:
+                    recovery["mobility_min"] = 10  # Default mobility time
+                
+                # Ensure correct data types for recovery fields
+                if "sleep_target_hr" in recovery and not isinstance(recovery["sleep_target_hr"], (int, float)):
+                    try:
+                        recovery["sleep_target_hr"] = float(recovery["sleep_target_hr"])
+                    except:
+                        recovery["sleep_target_hr"] = 8.0
+                if "mobility_min" in recovery and not isinstance(recovery["mobility_min"], int):
+                    try:
+                        recovery["mobility_min"] = int(recovery["mobility_min"])
+                    except:
+                        recovery["mobility_min"] = 10
+                if "hydration_l" in recovery and not isinstance(recovery["hydration_l"], (int, float)):
+                    try:
+                        recovery["hydration_l"] = float(recovery["hydration_l"])
+                    except:
+                        recovery["hydration_l"] = 3.0
+    
+    # Transform summary structure
+    if "summary" not in plan:
+        plan["summary"] = {}
+    
+    summary = plan["summary"]
+    if "grocery_gap" not in summary:
+        summary["grocery_gap"] = []
+    elif isinstance(summary["grocery_gap"], str):
+        summary["grocery_gap"] = [summary["grocery_gap"]]
+    elif not isinstance(summary["grocery_gap"], list):
+        summary["grocery_gap"] = []
+    
+    if "total_training_min" not in summary:
+        # Calculate total training time
+        total_min = 0
+        if "days" in plan:
+            for day in plan["days"]:
+                if "workout" in day and "duration_min" in day["workout"]:
+                    total_min += day["workout"]["duration_min"]
+        summary["total_training_min"] = total_min
+    elif not isinstance(summary["total_training_min"], int):
+        try:
+            summary["total_training_min"] = int(summary["total_training_min"])
+        except:
+            summary["total_training_min"] = 0
+    
+    if "notes" not in summary:
+        summary["notes"] = "Generated weekly plan"
+    elif not isinstance(summary["notes"], str):
+        summary["notes"] = str(summary["notes"])
+    
+    # Add justification if missing
+    if "justification" not in plan:
+        plan["justification"] = "AI-generated personalized fitness and nutrition plan based on your profile and preferences."
+    
+    return plan
+
+
 def validate_input(input_data):
     try:
         jsonschema.validate(instance=input_data, schema=INPUT_CONTRACT_V1)
@@ -126,34 +332,45 @@ def generate_weekly_plan(input_data):
     system_prompt = f"""You are a fitness and nutrition planning expert. Generate a 7-day weekly plan with workouts and meals.
 
 CRITICAL REQUIREMENTS:
-1. Validate all outputs against the JSON schema. Return valid JSON only.
-2. Only use equipment from the provided list: {equipment.get('items', [])}
-3. Only use ingredients from pantry: {pantry.get('items', [])}
-4. Respect dietary restrictions: {questionnaire.get('diet_json', {})}
-5. Avoid allergens: {questionnaire.get('allergens_json', [])}
-6. Respect injuries/limitations: {questionnaire.get('bio_json', {}).get('injuries', [])}
-7. Gym access pattern: {gym_frequency}
+1. Return ONLY valid JSON - no markdown formatting, no code blocks, no explanations
+2. The JSON must have this EXACT structure at the root level:
+   {{
+     "week_start": "YYYY-MM-DD",
+     "days": [...],
+     "summary": {{...}},
+     "justification": "..."
+   }}
+3. Only use equipment from the provided list: {equipment.get('items', [])}
+4. Only use ingredients from pantry: {pantry.get('items', [])}
+5. Respect dietary restrictions: {questionnaire.get('diet_json', {})}
+6. Avoid allergens: {questionnaire.get('allergens_json', [])}
+7. Respect injuries/limitations: {questionnaire.get('bio_json', {}).get('injuries', [])}
+8. Gym access pattern: {gym_frequency}
    - If "weekends_only": gym workouts Saturday-Sunday, home workouts Monday-Friday
    - If "daily": gym workouts available any day based on schedule
    - If "never": all workouts must be at-home with available equipment only
-8. Grocery shopping frequency: {grocery_frequency}
+9. Grocery shopping frequency: {grocery_frequency}
    - Plan meals using pantry items prioritizing freshness
    - Generate grocery gap list for items needed until next shopping day
-9. Free time blocks: {availability.get('free_blocks', [])}
-10. User goals: {questionnaire.get('goals_json', {})}
-11. Cuisine preferences: {questionnaire.get('cuisine_json', {})}
+10. Free time blocks: {availability.get('free_blocks', [])}
+11. User goals: {questionnaire.get('goals_json', {})}
+12. Cuisine preferences: {questionnaire.get('cuisine_json', {})}
 
-WORKOUT LOCATION LOGIC:
-- On gym-access days: suggest gym-based exercises if user has gym access
-- On non-gym days: suggest at-home calisthenics/bodyweight using available equipment
-- Each workout must include "location" field: "gym" or "home"
+WORKOUT STRUCTURE:
+Each workout must have: start, duration_min, location, blocks, intensity_note, fallbacks
+Each block must have: name, sets, reps, rest_sec
 
-MEAL PLANNING LOGIC:
-- Use pantry items first, especially perishables
-- Only add to grocery_gap if truly needed and not in pantry
-- Account for {grocery_frequency} shopping pattern
+MEAL STRUCTURE:
+Each meal must have: time, name, ingredients (array of strings), macro_note
+Optional: recipe_steps (array of strings)
 
-Return JSON matching weekly_plan_v1 schema with 7 days, workouts with location, meals, recovery targets."""
+RECOVERY STRUCTURE:
+Each recovery must have: sleep_target_hr, mobility_min, hydration_l
+
+SUMMARY STRUCTURE:
+Must have: grocery_gap (array of strings), total_training_min (integer), notes (string)
+
+IMPORTANT: Return ONLY the JSON object with the exact structure above. Do not wrap in any container object."""
 
     user_prompt = f"""Generate a weekly plan starting {week_start} for timezone {timezone}.
 
@@ -169,20 +386,47 @@ Equipment: {equipment.get('items', [])}
 Pantry: {json.dumps(pantry.get('items', []), indent=2)}
 Free blocks: {availability.get('free_blocks', [])}
 
-Return valid JSON following weekly_plan_v1 schema with all 7 days populated."""
+Return ONLY the JSON object following weekly_plan_v1 schema with all 7 days populated. No markdown formatting."""
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-5",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            max_completion_tokens=8192
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Combine system and user prompts for Gemini
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=8192,
+                temperature=0.7
+            )
         )
         
-        plan = json.loads(response.choices[0].message.content)
+        # Check if response is empty or None
+        if not response or not response.text:
+            return {"status": "ERROR", "message": "Empty response from Google Gemini API. Please check your API key and try again."}
+        
+        # Log the raw response for debugging
+        print(f"Raw API response: {response.text[:500]}...")  # First 500 chars for debugging
+        
+        # Clean the response text - remove markdown code blocks if present
+        response_text = clean_json_response(response.text)
+        
+        try:
+            plan = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            return {"status": "ERROR", "message": f"Invalid JSON response from API: {str(e)}. Raw response: {response_text[:200]}..."}
+        
+        # Transform the API response to match our schema
+        print(f"Before transformation - plan keys: {list(plan.keys())}")
+        if "days" in plan:
+            print(f"First day keys: {list(plan['days'][0].keys()) if plan['days'] else 'No days'}")
+        
+        plan = transform_api_response(plan)
+        
+        print(f"After transformation - plan keys: {list(plan.keys())}")
+        if "days" in plan:
+            print(f"First day keys: {list(plan['days'][0].keys()) if plan['days'] else 'No days'}")
         
         try:
             jsonschema.validate(instance=plan, schema=WEEKLY_PLAN_V1)
@@ -226,17 +470,23 @@ Schedule changes: {json.dumps(schedule_delta, indent=2) if schedule_delta else '
 Adapt the plan for remaining days."""
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-5",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            max_completion_tokens=4096
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Combine system and user prompts for Gemini
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=4096,
+                temperature=0.7
+            )
         )
         
-        return json.loads(response.choices[0].message.content)
+        # Clean the response text - remove markdown code blocks if present
+        response_text = clean_json_response(response.text)
+        
+        return json.loads(response_text)
     
     except Exception as e:
         return {"status": "ERROR", "message": f"Failed to adapt plan: {str(e)}"}
@@ -255,17 +505,23 @@ Return JSON matching single day from weekly_plan_v1 schema."""
 Context: {json.dumps(input_data, indent=2)}"""
 
     try:
-        response = openai.chat.completions.create(
-            model="gpt-5",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"},
-            max_completion_tokens=4096
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Combine system and user prompts for Gemini
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=4096,
+                temperature=0.7
+            )
         )
         
-        return json.loads(response.choices[0].message.content)
+        # Clean the response text - remove markdown code blocks if present
+        response_text = clean_json_response(response.text)
+        
+        return json.loads(response_text)
     
     except Exception as e:
         return {"status": "ERROR", "message": f"Failed to regenerate day: {str(e)}"}
