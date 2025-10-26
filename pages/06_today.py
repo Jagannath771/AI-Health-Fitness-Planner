@@ -1,6 +1,7 @@
 import streamlit as st
 from database import SessionLocal, WeeklyPlan, AdherenceLog
 from datetime import date, timedelta
+from adaptive_logic import check_and_adapt_plan
 import json
 
 st.title("📆 Today")
@@ -149,9 +150,15 @@ if st.button("💾 Save Adherence Log", type="primary", use_container_width=True
     st.success("✅ Adherence logged successfully!")
     
     if soreness >= 8:
-        st.warning("⚠️ High soreness detected! Your next workout may be adjusted for recovery.")
+        st.warning("⚠️ High soreness detected! Checking if plan adaptation is needed...")
+        adapted, reasons = check_and_adapt_plan(st.session_state.user_id)
+        if adapted and "days_patch" in adapted:
+            st.info(f"🔄 Plan adapted: {adapted.get('reason', 'Adjusted for recovery')}")
     
     if rpe >= 9:
         st.info("💪 Great effort! Recovery is important - stay hydrated and rest well.")
+        adapted, reasons = check_and_adapt_plan(st.session_state.user_id)
+        if adapted and "days_patch" in adapted:
+            st.info(f"🔄 Plan adapted: {adapted.get('reason', 'Intensity adjusted based on high effort')}")
 
 db.close()

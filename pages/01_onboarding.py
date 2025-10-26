@@ -1,5 +1,6 @@
 import streamlit as st
 from database import SessionLocal, Questionnaire
+from datetime import time
 import json
 
 st.title("📋 Onboarding")
@@ -127,8 +128,17 @@ with col2:
 st.subheader("⏰ Work Schedule & Timezone")
 col1, col2 = st.columns(2)
 with col1:
-    work_start = st.time_input("Work Start Time", value=default_work.get("start", "09:00"))
-    work_end = st.time_input("Work End Time", value=default_work.get("end", "17:00"))
+    start_default = default_work.get("start", "09:00")
+    if isinstance(start_default, str):
+        start_h, start_m = map(int, start_default.split(":"))
+        start_default = time(start_h, start_m)
+    work_start = st.time_input("Work Start Time", value=start_default)
+    
+    end_default = default_work.get("end", "17:00")
+    if isinstance(end_default, str):
+        end_h, end_m = map(int, end_default.split(":"))
+        end_default = time(end_h, end_m)
+    work_end = st.time_input("Work End Time", value=end_default)
 
 with col2:
     timezone = st.selectbox(
@@ -140,9 +150,13 @@ with col2:
     st.session_state.timezone = timezone
 
 st.subheader("🔔 Reminder Preferences")
+reminder_default = default_reminder.get("time", "06:00")
+if isinstance(reminder_default, str):
+    rem_h, rem_m = map(int, reminder_default.split(":"))
+    reminder_default = time(rem_h, rem_m)
 reminder_time = st.time_input(
     "Daily Reminder Time",
-    value=default_reminder.get("time", "06:00")
+    value=reminder_default
 )
 reminder_channels = st.multiselect(
     "Reminder Channels (future feature)",

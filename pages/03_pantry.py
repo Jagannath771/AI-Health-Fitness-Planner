@@ -1,6 +1,7 @@
 import streamlit as st
 from database import SessionLocal, Pantry
 from datetime import date, timedelta
+from adaptive_logic import auto_replan_after_pantry_update
 import json
 
 st.title("🥗 Pantry")
@@ -120,8 +121,35 @@ with col1:
         st.info("👉 Next: Set your schedule in the **Schedule** page")
 
 with col2:
-    if st.button("🔄 Mid-Week Restock", use_container_width=True):
-        st.session_state.last_shopping = date.today()
-        st.info("🛒 Mark your new items above and save. The meal plan will adapt for remaining days!")
+    if st.button("🔄 Mid-Week Restock & Replan", use_container_width=True):
+        if st.session_state.pantry_items:
+            items_json = {"items": st.session_state.pantry_items}
+            
+            if existing:
+                existing.items_json = items_json
+                existing.last_shopping_date = date.today()
+            else:
+                new_pantry = Pantry(
+                    user_id=st.session_state.user_id,
+                    items_json=items_json,
+                    last_shopping_date=date.today(),
+                    next_shopping_date=next_shopping
+                )
+                db.add(new_pantry)
+            
+            db.commit()
+            st.success("✅ Pantry updated!")
+            
+            with st.spinner("🔄 Replanning meals for remaining days..."):
+                adapted, message = auto_replan_after_pantry_update(st.session_state.user_id)
+                if adapted and "days_patch" in adapted:
+                    st.success(f"✅ {message}")
+                    st.info(f"🍽️ Meal plan updated: {adapted.get('reason', 'Using updated pantry items')}")
+                elif adapted and "status" in adapted:
+                    st.warning(f"⚠️ {adapted.get('message', message)}")
+                else:
+                    st.info(f"ℹ️ {message}")
+        else:
+            st.warning("⚠️ Add pantry items first!")
 
 db.close()
