@@ -2,10 +2,11 @@ import streamlit as st
 from database import SessionLocal, Pantry
 from datetime import date, timedelta
 from adaptive_logic import auto_replan_after_pantry_update
+from openai_service import analyze_grocery_receipt
 import json
 
 st.title("🥗 Pantry")
-st.markdown("Track your groceries and shopping schedule for pantry-driven meal planning.")
+st.markdown("Track your groceries and shopping schedule for pantry-driven meal planning. Upload your grocery receipt to automatically add items!")
 
 db = SessionLocal()
 
@@ -63,6 +64,38 @@ if st.session_state.pantry_items:
                 st.rerun()
 else:
     st.info("No pantry items added yet. Add your first item below!")
+
+st.markdown("---")
+st.subheader("Upload Receipt")
+st.info("📸 Note: The receipt scanning feature provides a quick start by detecting items, but may not be 100% accurate. Please review and adjust the detected items as needed!")
+uploaded_file = st.file_uploader("Upload a photo of your grocery receipt to automatically add items", type=['png', 'jpg', 'jpeg'])
+
+if uploaded_file is not None:
+    # Display the uploaded image
+    st.image(uploaded_file, caption="Uploaded Receipt", use_column_width=True)
+    
+    # Analyze the image when user clicks the button
+    if st.button("🔍 Scan Receipt"):
+        with st.spinner("Analyzing receipt..."):
+            try:
+                # Read the file
+                bytes_data = uploaded_file.getvalue()
+                # Analyze the receipt
+                detected_items = analyze_grocery_receipt(bytes_data)
+                
+                if detected_items:
+                    st.success(f"✅ Detected {len(detected_items)} items from receipt!")
+                    for item in detected_items:
+                        # Check if item already exists
+                        exists = any(existing['name'].lower() == item['name'].lower() 
+                                   for existing in st.session_state.pantry_items)
+                        if not exists:
+                            st.session_state.pantry_items.append(item)
+                    st.rerun()
+                else:
+                    st.warning("No items detected in the receipt. Try uploading a clearer photo or add items manually.")
+            except Exception as e:
+                st.error(f"Error analyzing receipt: {str(e)}")
 
 st.markdown("---")
 st.subheader("Add Pantry Item")

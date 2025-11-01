@@ -130,14 +130,24 @@ col1, col2 = st.columns(2)
 with col1:
     start_default = default_work.get("start", "09:00")
     if isinstance(start_default, str):
-        start_h, start_m = map(int, start_default.split(":"))
-        start_default = time(start_h, start_m)
+        try:
+            start_h, start_m = map(int, start_default.split(":"))
+            start_default = time(start_h, start_m)
+        except (ValueError, TypeError):
+            start_default = time(9, 0)  # fallback to 9:00 AM
+    elif not isinstance(start_default, time):
+        start_default = time(9, 0)  # fallback to 9:00 AM
     work_start = st.time_input("Work Start Time", value=start_default)
     
     end_default = default_work.get("end", "17:00")
     if isinstance(end_default, str):
-        end_h, end_m = map(int, end_default.split(":"))
-        end_default = time(end_h, end_m)
+        try:
+            end_h, end_m = map(int, end_default.split(":"))
+            end_default = time(end_h, end_m)
+        except (ValueError, TypeError):
+            end_default = time(17, 0)  # fallback to 5:00 PM
+    elif not isinstance(end_default, time):
+        end_default = time(17, 0)  # fallback to 5:00 PM
     work_end = st.time_input("Work End Time", value=end_default)
 
 with col2:
@@ -152,8 +162,13 @@ with col2:
 st.subheader("🔔 Reminder Preferences")
 reminder_default = default_reminder.get("time", "06:00")
 if isinstance(reminder_default, str):
-    rem_h, rem_m = map(int, reminder_default.split(":"))
-    reminder_default = time(rem_h, rem_m)
+    try:
+        parts = reminder_default.split(":")
+        rem_h, rem_m = map(int, parts[:2])  # Take only the first two parts
+        reminder_default = time(rem_h, rem_m)
+    except (ValueError, IndexError):
+        # If there's any error, fallback to 6:00 AM
+        reminder_default = time(6, 0)
 reminder_time = st.time_input(
     "Daily Reminder Time",
     value=reminder_default

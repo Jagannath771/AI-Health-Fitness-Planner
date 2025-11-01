@@ -3,11 +3,186 @@ import os
 import google.generativeai as genai
 from datetime import datetime, timedelta
 import jsonschema
+import requests
+import base64
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY environment variable is not set. Please set it to your Google AI API key.")
+
+def analyze_grocery_receipt(image_bytes):
+    """Analyze grocery receipt image using Google Cloud Vision API"""
+    # Convert the image to base64
+    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Prepare the request
+    url = 'https://vision.googleapis.com/v1/images:annotate'
+    headers = {
+        'x-goog-api-key': GOOGLE_API_KEY,
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        'requests': [{
+            'image': {
+                'content': base64_image
+            },
+            'features': [{
+                'type': 'TEXT_DETECTION',
+                'maxResults': 50
+            }]
+        }]
+    }
+    
+    # Make the request
+    response = requests.post(url, headers=headers, json=payload)
+    if not response.ok:
+        raise Exception(f"Error calling Vision API: {response.text}")
+    
+    result = response.json()
+    
+    if 'responses' not in result or not result['responses'] or 'fullTextAnnotation' not in result['responses'][0]:
+        return []
+    
+    # Process the detected text
+    full_text = result['responses'][0]['fullTextAnnotation']['text']
+    items = []
+    
+    # Split text into lines and process each line
+    for line in full_text.split('\n'):
+        # Basic filtering for likely product lines (contains numbers, etc.)
+        if any(c.isdigit() for c in line):
+            # Extract quantity and name using some basic heuristics
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    # Try to find number-like parts
+                    qty = next((p for p in parts if any(c.isdigit() for c in p)), "1")
+                    # Remove the quantity part and join the rest as the name
+                    name = " ".join(p for p in parts if p != qty)
+                    items.append({"name": name.strip(), "qty_unit": qty.strip()})
+                except:
+                    continue
+    
+    return items
+
+def analyze_gym_equipment(image_bytes):
+    """Analyze gym equipment image using Google Cloud Vision API"""
+    # Convert the image to base64
+    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Prepare the request for both object detection and label detection
+    url = 'https://vision.googleapis.com/v1/images:annotate'
+    headers = {
+        'x-goog-api-key': GOOGLE_API_KEY,
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        'requests': [{
+            'image': {
+                'content': base64_image
+            },
+            'features': [
+                {
+                    'type': 'OBJECT_LOCALIZATION',
+                    'maxResults': 50
+                },
+                {
+                    'type': 'LABEL_DETECTION',
+                    'maxResults': 50
+                }
+            ]
+        }]
+    }
+    
+    # Make the request
+    response = requests.post(url, headers=headers, json=payload)
+    if not response.ok:
+        raise Exception(f"Error calling Vision API: {response.text}")
+    
+    result = response.json()
+    
+    if 'responses' not in result or not result['responses']:
+        return []
+    
+    response = result['responses'][0]
+    detected_equipment = set()  # Use set to avoid duplicates
+
+    # Common gym equipment keywords and mappings
+    gym_equipment_keywords = {
+        # Strength Training
+        'dumbbell': 'Dumbbells',
+        'barbell': 'Barbell',
+        'weight': 'Free Weights',
+        'kettlebell': 'Kettlebells',
+        'plate': 'Weight Plates',
+        'rack': 'Equipment Rack',
+        'bench': 'Exercise Bench',
+        'smith machine': 'Smith Machine',
+        'cable': 'Cable Machine',
+        
+        # Cardio Equipment
+        'treadmill': 'Treadmill',
+        'bicycle': 'Stationary Bike',
+        'bike': 'Stationary Bike',
+        'elliptical': 'Elliptical Machine',
+        'rowing': 'Rowing Machine',
+        'rower': 'Rowing Machine',
+        'stair': 'Stair Climber',
+        
+        # Functional Training
+        'mat': 'Yoga Mat',
+        'foam roller': 'Foam Roller',
+        'resistance band': 'Resistance Bands',
+        'ball': 'Exercise Ball',
+        'medicine ball': 'Medicine Ball',
+        'boxing': 'Boxing Equipment',
+        'trx': 'TRX Suspension',
+        'pull-up bar': 'Pull-up Bar',
+        'pullup bar': 'Pull-up Bar',
+        
+        # Generic Terms
+        'gym': 'Exercise Equipment',
+        'fitness': 'Exercise Equipment',
+        'exercise': 'Exercise Equipment',
+        'sports equipment': 'Exercise Equipment',
+        'machine': 'Exercise Machine'
+    }
+
+    # Process object detection results
+    if 'localizedObjectAnnotations' in response:
+        for obj in response['localizedObjectAnnotations']:
+            name = obj['name'].lower()
+            # Check if the object name matches any of our equipment keywords
+            for keyword, equipment in gym_equipment_keywords.items():
+                if keyword in name:
+                    detected_equipment.add(equipment)
+                    break
+
+    # Process label detection results
+    if 'labelAnnotations' in response:
+        for label in response['labelAnnotations']:
+            description = label['description'].lower()
+            # Only consider labels with confidence above 0.5
+            if label['score'] >= 0.5:
+                # Check if the label matches any of our equipment keywords
+                for keyword, equipment in gym_equipment_keywords.items():
+                    if keyword in description:
+                        detected_equipment.add(equipment)
+                        break
+    
+    # Special case: If we detect general gym/fitness equipment but no specifics
+    if len(detected_equipment) <= 1 and 'Exercise Equipment' in detected_equipment:
+        # Try to look for specific equipment in the raw text
+        if 'textAnnotations' in response and response['textAnnotations']:
+            full_text = response['textAnnotations'][0]['description'].lower()
+            for keyword, equipment in gym_equipment_keywords.items():
+                if keyword in full_text and equipment != 'Exercise Equipment':
+                    detected_equipment.add(equipment)
+
+    return list(detected_equipment)
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
@@ -150,20 +325,41 @@ def transform_api_response(plan):
                         day["date"] = f"2025-10-{20 + i}"
             
             # Transform workout structure
-            if "workout" in day:
-                workout = day["workout"]
-                # Convert exercises to blocks format
-                if "exercises" in workout and "blocks" not in workout:
-                    blocks = []
-                    for exercise in workout["exercises"]:
-                        block = {
-                            "name": exercise["name"],
-                            "sets": exercise["sets"],
-                            "reps": str(exercise["reps"]),
-                            "rest_sec": 60  # Default rest time
-                        }
-                        blocks.append(block)
-                    workout["blocks"] = blocks
+            if "workouts" in day:  # Handle case where API returns array of workouts
+                # Take the first workout if multiple are provided
+                workout = day["workouts"][0] if isinstance(day["workouts"], list) and len(day["workouts"]) > 0 else {
+                    "start": "18:00",
+                    "duration_min": 60,
+                    "location": "home",
+                    "blocks": [],
+                    "intensity_note": "Rest day",
+                    "fallbacks": []
+                }
+                day["workout"] = workout
+                del day["workouts"]
+            elif "workout" not in day:  # Create default workout if none exists
+                day["workout"] = {
+                    "start": "18:00",
+                    "duration_min": 60,
+                    "location": "home",
+                    "blocks": [],
+                    "intensity_note": "Rest day",
+                    "fallbacks": []
+                }
+            
+            workout = day["workout"]
+            # Convert exercises to blocks format
+            if "exercises" in workout and "blocks" not in workout:
+                blocks = []
+                for exercise in workout["exercises"]:
+                    block = {
+                        "name": exercise["name"],
+                        "sets": exercise.get("sets", 3),
+                        "reps": str(exercise.get("reps", "10")),
+                        "rest_sec": exercise.get("rest_sec", 60)
+                    }
+                    blocks.append(block)
+                workout["blocks"] = blocks
                 
                 # Ensure blocks have correct data types
                 if "blocks" in workout:
@@ -195,14 +391,27 @@ def transform_api_response(plan):
                     workout["intensity_note"] = "Moderate intensity"
                 elif not isinstance(workout["intensity_note"], str):
                     workout["intensity_note"] = str(workout["intensity_note"])
+                if "location" not in workout:
+                    workout["location"] = "home"  # Default location
+                elif not isinstance(workout["location"], str):
+                    workout["location"] = str(workout["location"]).lower()
+                if "blocks" not in workout:
+                    workout["blocks"] = []  # Default empty blocks for rest day
+                # Ensure fallbacks is always a properly formatted array of strings
                 if "fallbacks" not in workout:
                     workout["fallbacks"] = []
                 elif isinstance(workout["fallbacks"], str):
-                    # Convert string fallbacks to array
-                    workout["fallbacks"] = [workout["fallbacks"]]
-                elif not isinstance(workout["fallbacks"], list):
-                    # Ensure fallbacks is always an array
-                    workout["fallbacks"] = []
+                    # Split string by commas or convert single string to array
+                    if "," in workout["fallbacks"]:
+                        workout["fallbacks"] = [s.strip() for s in workout["fallbacks"].split(",")]
+                    else:
+                        workout["fallbacks"] = [workout["fallbacks"]]
+                elif isinstance(workout["fallbacks"], list):
+                    # Ensure all items in the array are strings
+                    workout["fallbacks"] = [str(item) for item in workout["fallbacks"]]
+                else:
+                    # Convert any other type to a string and wrap in array
+                    workout["fallbacks"] = [str(workout["fallbacks"])]
             
             # Transform meals structure
             if "meals" in day:
@@ -470,7 +679,7 @@ Schedule changes: {json.dumps(schedule_delta, indent=2) if schedule_delta else '
 Adapt the plan for remaining days."""
 
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-pro')
         
         # Combine system and user prompts for Gemini
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
@@ -505,7 +714,7 @@ Return JSON matching single day from weekly_plan_v1 schema."""
 Context: {json.dumps(input_data, indent=2)}"""
 
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-pro')
         
         # Combine system and user prompts for Gemini
         full_prompt = f"{system_prompt}\n\n{user_prompt}"

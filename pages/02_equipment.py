@@ -1,9 +1,10 @@
 import streamlit as st
 from database import SessionLocal, Equipment
+from openai_service import analyze_gym_equipment
 import json
 
 st.title("🏋️ Equipment")
-st.markdown("List all equipment you have access to at home or at the gym.")
+st.markdown("List all equipment you have access to at home or at the gym. Upload a photo of your gym to automatically detect equipment!")
 
 db = SessionLocal()
 
@@ -30,6 +31,35 @@ if st.session_state.equipment_items:
                 st.rerun()
 else:
     st.info("No equipment added yet. Add your first item below!")
+
+st.markdown("---")
+st.subheader("Upload Gym Photo")
+st.info("📸 Note: The automatic detection serves as a starting point and may not be 100% accurate. Feel free to add or remove items as needed!")
+uploaded_file = st.file_uploader("Upload a photo of your gym to automatically detect equipment", type=['png', 'jpg', 'jpeg'])
+
+if uploaded_file is not None:
+    # Display the uploaded image
+    st.image(uploaded_file, caption="Uploaded Gym Image", use_column_width=True)
+    
+    # Analyze the image when user clicks the button
+    if st.button("🔍 Detect Equipment"):
+        with st.spinner("Analyzing image..."):
+            try:
+                # Read the file
+                bytes_data = uploaded_file.getvalue()
+                # Analyze the image
+                detected_items = analyze_gym_equipment(bytes_data)
+                
+                if detected_items:
+                    st.success(f"✅ Detected {len(detected_items)} pieces of equipment!")
+                    for item in detected_items:
+                        if item not in st.session_state.equipment_items:
+                            st.session_state.equipment_items.append(item)
+                    st.rerun()
+                else:
+                    st.warning("No equipment detected in the image. Try uploading a clearer photo or add equipment manually.")
+            except Exception as e:
+                st.error(f"Error analyzing image: {str(e)}")
 
 st.markdown("---")
 st.subheader("Add New Equipment")

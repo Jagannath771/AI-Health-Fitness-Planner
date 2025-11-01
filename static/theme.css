@@ -1,0 +1,102 @@
+/* -------- FitLife Planner Global Theme -------- */
+:root{
+  --bg:#0f1117; 
+  --surface:rgba(255,255,255,.05); 
+  --surface-2:rgba(255,255,255,.07);
+  --border:rgba(255,255,255,.10); 
+  --text:#e7eaf0; 
+  --text-dim:#b8c0cc;
+  --brand:#14b08f; 
+  --brand-2:#7aa8ff; 
+  --shadow:0 8px 28px rgba(0,0,0,.35);
+}
+
+/* Fitness themed background */
+html, body, [data-testid="stAppViewContainer"] {
+  min-height: 100vh;
+  background: 
+    linear-gradient(rgba(15,17,23,0.80), rgba(15,17,23,0.80)),
+    url("https://images.unsplash.com/photo-1517836357463-d25dfeac3438?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80") 
+    no-repeat center center fixed;
+  background-size: cover;
+  color: var(--text);
+}
+
+/* Extra spacing under nav bar */
+.block-container {max-width:1200px; padding-top:1rem; padding-bottom:3rem;}
+
+/* Sidebar removed */
+[data-testid="stSidebar"],[data-testid="stSidebarNav"],
+section[data-testid="stSidebar"],section[data-testid="stSidebarNav"]{display:none!important;}
+[data-testid="stAppViewContainer"]>.main{margin-left:0!important; background:transparent!important;}
+
+/* Typography */
+h1,h2,h3{color:var(--text);} 
+p,li,span,a{color:var(--text);}
+small,.caption{color:var(--text-dim)!important;}
+
+/* Cards */
+.fl-card{
+  background:var(--surface); 
+  border:1px solid var(--border); 
+  border-radius:20px; 
+  padding:24px; 
+  box-shadow:var(--shadow);
+}
+.fl-hero{
+  background:
+    radial-gradient(800px 520px at 5% 0%, rgba(20,176,143,.12), transparent 60%),
+    radial-gradient(700px 480px at 95% 18%, rgba(122,168,255,.12), transparent 60%),
+    var(--surface-2);
+  border:1px solid rgba(255,255,255,.09); 
+  border-radius:22px; 
+  padding:28px; 
+  margin-top:6px;
+}
+.fl-hero h1{margin:0 0 6px 0; font-size:38px;}
+.fl-hero h3{margin:0 0 10px 0; font-weight:500; color:var(--text);}
+.fl-hero p{margin:0; font-size:18px; color:var(--text-dim);}
+
+/* -------- Top nav (sticky pill bar) -------- */
+.fl-bar-wrap{
+  position:sticky; 
+  top:8px; 
+  z-index:999;
+  padding:8px 8px 10px;
+  background:rgba(15,17,23,.70);
+  -webkit-backdrop-filter:blur(10px); 
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(255,255,255,.06);
+  overflow:visible;
+}
+
+/* Style nav pills */
+a[data-testid^="stPageLink"]{
+  display:inline-flex!important; 
+  align-items:center; 
+  justify-content:center;
+  padding:8px 14px; 
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:999px; 
+  background:rgba(255,255,255,.03); 
+  text-decoration:none!important;
+  white-space:nowrap; 
+  transition:all .18s ease; 
+  color:var(--text)!important;
+  margin-top:2px;
+}
+a[data-testid^="stPageLink"]:hover{
+  transform:translateY(-1px);
+  border-color:rgba(122,168,255,.5); 
+  box-shadow:0 10px 22px rgba(122,168,255,.14);
+}
+
+/* Remove Streamlit page link ornaments */
+a[data-testid^="stPageLink"]::before,
+a[data-testid^="stPageLink"]::after,
+[data-testid^="stPageLink-NavIcon"],
+[data-testid^="stPageLinkSeparator"],
+[data-testid="stPageLink-RightArrow"],
+[data-testid="stPageLink-LeftPart"],
+[data-testid="stPageLink-RightPart"]{display:none!important;}
+ul,ol{list-style:none!important; padding-left:0!important; margin-left:0!important;}
