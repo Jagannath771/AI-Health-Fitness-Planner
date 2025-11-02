@@ -13,7 +13,8 @@ current_week_start = date.today() - timedelta(days=date.today().weekday())
 
 plan = db.query(WeeklyPlan).filter(
     WeeklyPlan.user_id == st.session_state.user_id,
-    WeeklyPlan.week_start_date == current_week_start
+    WeeklyPlan.week_start_date <= date.today(),
+    WeeklyPlan.week_start_date > date.today() - timedelta(days=7)
 ).order_by(WeeklyPlan.created_at.desc()).first()
 
 if not plan:

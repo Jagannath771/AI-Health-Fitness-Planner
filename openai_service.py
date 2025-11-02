@@ -297,6 +297,53 @@ def transform_api_response(plan):
     # Fix field name mapping
     if "start_date" in plan and "week_start" not in plan:
         plan["week_start"] = plan["start_date"]
+        
+    # Ensure days array exists and transform workout data
+    if "days" in plan:
+        for day in plan["days"]:
+            if "workout" in day:
+                workout = day["workout"]
+                # Ensure required workout fields exist
+                if "start" not in workout:
+                    workout["start"] = "18:00"  # Default to evening
+                if "duration_min" not in workout:
+                    workout["duration_min"] = 60  # Default duration
+                if "location" not in workout:
+                    workout["location"] = "home"  # Default location
+                if "blocks" not in workout:
+                    workout["blocks"] = []
+                if "intensity_note" not in workout:
+                    workout["intensity_note"] = "Moderate intensity"
+                
+                # Handle fallbacks conversion
+                if "fallbacks" not in workout:
+                    workout["fallbacks"] = []
+                elif isinstance(workout["fallbacks"], str):
+                    # Split by commas if it's a comma-separated string
+                    if "," in workout["fallbacks"]:
+                        workout["fallbacks"] = [f.strip() for f in workout["fallbacks"].split(",")]
+                    else:
+                        workout["fallbacks"] = [workout["fallbacks"]]
+                elif not isinstance(workout["fallbacks"], list):
+                    workout["fallbacks"] = [str(workout["fallbacks"])]
+                
+                # Ensure workout blocks have correct types
+                if "blocks" in workout:
+                    for block in workout["blocks"]:
+                        # Convert reps to string if it's not already
+                        if "reps" in block and not isinstance(block["reps"], str):
+                            block["reps"] = str(block["reps"])
+                        # Ensure other required fields have correct types
+                        if "sets" in block and not isinstance(block["sets"], int):
+                            try:
+                                block["sets"] = int(block["sets"])
+                            except (ValueError, TypeError):
+                                block["sets"] = 3  # Default value if conversion fails
+                        if "rest_sec" in block and not isinstance(block["rest_sec"], int):
+                            try:
+                                block["rest_sec"] = int(block["rest_sec"])
+                            except (ValueError, TypeError):
+                                block["rest_sec"] = 60  # Default value if conversion fails
     
     # Transform days structure
     if "days" in plan:
