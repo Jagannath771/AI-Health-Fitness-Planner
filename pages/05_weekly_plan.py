@@ -57,7 +57,7 @@ with col2:
     st.info(f"🏋️ Gym Access: **{questionnaire.gym_frequency}**")
     st.info(f"🛒 Grocery Frequency: **{questionnaire.grocery_frequency}**")
 
-if st.button("🤖 Generate Weekly Plan", type="primary", width="stretch"):
+if st.button("🤖 Generate Weekly Plan", type="primary", use_container_width=True):
     with st.spinner("🔮 AI is crafting your personalized plan..."):
         input_data = {
             "user": {
@@ -105,28 +105,28 @@ if st.button("🤖 Generate Weekly Plan", type="primary", width="stretch"):
             db.commit()
             
             st.session_state.current_plan = plan
+            # Persist a flag so the Continue button exists on the next rerun
+            st.session_state.show_continue_to_today = True
             st.success("✅ Weekly plan generated successfully!")
             st.balloons()
-            
-            # Add navigation section
-            st.markdown("---")
-            st.markdown("""
-            <div style='text-align: center; padding: 1rem;'>
-                <h4>🎯 Next Step: Today's Plan</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Center the button using columns
-            col1, col2, col3 = st.columns([2, 1, 2])
-            with col2:
-                if st.button("Continue to Today →", type="primary", width="stretch"):
-                    st.switch_page("pages/06_today.py")
 
 st.markdown("---")
 
 existing_plans = db.query(WeeklyPlan).filter(
     WeeklyPlan.user_id == st.session_state.user_id
 ).order_by(WeeklyPlan.created_at.desc()).all()
+
+# Show a persistent navigation CTA to Today once a plan exists or flag is set
+if st.session_state.get("show_continue_to_today") or existing_plans:
+    st.markdown("""
+    <div style='text-align: center; padding: 1rem;'>
+        <h4>🎯 Next Step: Today's Plan</h4>
+    </div>
+    """, unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([2, 1, 2])
+    with col2:
+        if st.button("Continue to Today →", type="primary", use_container_width=True, key="continue_to_today"):
+            st.switch_page("pages/06_today.py")
 
 if existing_plans:
     st.subheader("📅 Your Plans")
