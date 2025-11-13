@@ -22,6 +22,38 @@ def apply_global_ui():
     """, unsafe_allow_html=True)
     _inject_theme()
 
+def show_next_step_button(current_page: str):
+    """Shows the next step button based on the current page."""
+    # Define the flow sequence with page numbers and names
+    flow = {
+        "onboarding": ("Equipment Setup", "pages/02_equipment.py"),
+        "equipment": ("Pantry Setup", "pages/03_pantry.py"),
+        "pantry": ("Schedule Setup", "pages/04_schedule.py"),
+        "schedule": ("Weekly Plan", "pages/05_weekly_plan.py"),
+        "weekly_plan": ("Today's Plan", "pages/06_today.py"),
+        "today": ("Progress Tracking", "pages/07_progress.py")
+    }
+    
+    if current_page in flow:
+        next_title, next_page = flow[current_page]
+        
+        # Add separator and section title
+        st.markdown("---")
+        st.markdown("""
+        <div style='text-align: center; padding: 1rem;'>
+            <h4>🎯 Next Step</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Create a centered container for the button
+        col1, col2, col3 = st.columns([2, 1, 2])
+        with col2:
+            # Simple direct navigation
+            if st.button(f"Continue to {next_title} →", 
+                        type="primary",
+                        width="stretch"):
+                st.switch_page(next_page)
+
 def top_nav(is_authed: bool = False, on_sign_out=None, current: str = ""):
     """
     Simple horizontal navigation using buttons.

@@ -179,7 +179,7 @@ reminder_channels = st.multiselect(
     default=default_reminder.get("channels", [])
 )
 
-if st.button("💾 Save Profile", type="primary", use_container_width=True):
+if st.button("💾 Save Profile", type="primary", width="stretch"):
     bio_json = {
         "age": age,
         "height_cm": height_cm,
@@ -244,6 +244,21 @@ if st.button("💾 Save Profile", type="primary", use_container_width=True):
     db.commit()
     st.success("✅ Profile saved successfully!")
     st.balloons()
-    st.info("👉 Next: Add your equipment in the **Equipment** page")
+    
+    # Add navigation section with proper spacing
+    st.write("")  # Add some space
+    st.markdown("""
+    <div style='background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 10px; text-align: center; margin: 1rem 0;'>
+        <h3 style='margin-bottom: 1rem;'>🎯 Next Step: Equipment Setup</h3>
+        <p style='color: #b8c0cc; margin-bottom: 1rem;'>Add your available workout equipment</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Center the button
+    col1, col2, col3 = st.columns([2, 1, 2])
+    with col2:
+        if st.button("Continue to Equipment →", type="primary", width="stretch"):
+            import streamlit as st
+            st.switch_page("pages/02_equipment.py")
 
 db.close()

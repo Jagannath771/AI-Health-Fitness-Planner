@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 import jsonschema
 import requests
 import base64
+import logging
+
+# Configure basic logging (optional enhancement for debugging)
+logging.basicConfig(level=logging.INFO)
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
@@ -107,85 +111,94 @@ def analyze_gym_equipment(image_bytes):
     if 'responses' not in result or not result['responses']:
         return []
     
-    response = result['responses'][0]
-    detected_equipment = set()  # Use set to avoid duplicates
+    items = set()
+    
+    # Process object detection results
+    localized_objects = result['responses'][0].get('localizedObjectAnnotations', [])
+    for obj in localized_objects:
+        name = obj.get('name', '').lower()
+        if any(keyword in name for keyword in ['dumbbell', 'weight', 'bench', 'mat', 'ball', 'rack', 'machine']):
+            items.add(name)
+    
+    # Process label detection results
+    labels = result['responses'][0].get('labelAnnotations', [])
+    for label in labels:
+        name = label.get('description', '').lower()
+        if any(keyword in name for keyword in ['dumbbell', 'weight', 'bench', 'mat', 'ball', 'rack', 'machine', 'gym']):
+            items.add(name)
+    
+    return list(items)
 
-    # Common gym equipment keywords and mappings
-    gym_equipment_keywords = {
-        # Strength Training
-        'dumbbell': 'Dumbbells',
-        'barbell': 'Barbell',
-        'weight': 'Free Weights',
-        'kettlebell': 'Kettlebells',
-        'plate': 'Weight Plates',
-        'rack': 'Equipment Rack',
-        'bench': 'Exercise Bench',
-        'smith machine': 'Smith Machine',
-        'cable': 'Cable Machine',
-        
-        # Cardio Equipment
-        'treadmill': 'Treadmill',
-        'bicycle': 'Stationary Bike',
-        'bike': 'Stationary Bike',
-        'elliptical': 'Elliptical Machine',
-        'rowing': 'Rowing Machine',
-        'rower': 'Rowing Machine',
-        'stair': 'Stair Climber',
-        
-        # Functional Training
-        'mat': 'Yoga Mat',
-        'foam roller': 'Foam Roller',
-        'resistance band': 'Resistance Bands',
-        'ball': 'Exercise Ball',
-        'medicine ball': 'Medicine Ball',
-        'boxing': 'Boxing Equipment',
-        'trx': 'TRX Suspension',
-        'pull-up bar': 'Pull-up Bar',
-        'pullup bar': 'Pull-up Bar',
-        
-        # Generic Terms
-        'gym': 'Exercise Equipment',
-        'fitness': 'Exercise Equipment',
-        'exercise': 'Exercise Equipment',
-        'sports equipment': 'Exercise Equipment',
-        'machine': 'Exercise Machine'
+def setup_genai():
+    """Configure the Google GenerativeAI client and return a usable model with fallback logic.
+
+    Order of precedence:
+    1. Explicit env var GEMINI_MODEL
+    2. Known stable models list fallback
+    Returns (model, chosen_model_name)
+    """
+    genai.configure(api_key=GOOGLE_API_KEY)
+
+    generation_config = {
+        "temperature": 0.6,  # slightly lower for more deterministic JSON
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 8192,  # larger plans sometimes exceed 3k tokens
     }
 
-    # Process object detection results
-    if 'localizedObjectAnnotations' in response:
-        for obj in response['localizedObjectAnnotations']:
-            name = obj['name'].lower()
-            # Check if the object name matches any of our equipment keywords
-            for keyword, equipment in gym_equipment_keywords.items():
-                if keyword in name:
-                    detected_equipment.add(equipment)
-                    break
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    ]
 
-    # Process label detection results
-    if 'labelAnnotations' in response:
-        for label in response['labelAnnotations']:
-            description = label['description'].lower()
-            # Only consider labels with confidence above 0.5
-            if label['score'] >= 0.5:
-                # Check if the label matches any of our equipment keywords
-                for keyword, equipment in gym_equipment_keywords.items():
-                    if keyword in description:
-                        detected_equipment.add(equipment)
-                        break
-    
-    # Special case: If we detect general gym/fitness equipment but no specifics
-    if len(detected_equipment) <= 1 and 'Exercise Equipment' in detected_equipment:
-        # Try to look for specific equipment in the raw text
-        if 'textAnnotations' in response and response['textAnnotations']:
-            full_text = response['textAnnotations'][0]['description'].lower()
-            for keyword, equipment in gym_equipment_keywords.items():
-                if keyword in full_text and equipment != 'Exercise Equipment':
-                    detected_equipment.add(equipment)
+    # Current Google Gemini model names (2025) — gemini-pro deprecated in favor of versioned names
+    preferred = os.environ.get("GEMINI_MODEL")
+    strict = os.environ.get("GEMINI_STRICT") in ["1", "true", "True"]
 
-    return list(detected_equipment)
+    if strict and preferred:
+        # Only attempt the preferred model and raise if it fails
+        try:
+            model = genai.GenerativeModel(
+                model_name=preferred,
+                generation_config=generation_config,
+                safety_settings=safety_settings,
+            )
+            logging.info(f"Using STRICT Gemini model: {preferred}")
+            return model, preferred
+        except Exception as e:
+            raise RuntimeError(f"Strict model '{preferred}' initialization failed: {e}")
 
-genai.configure(api_key=GOOGLE_API_KEY)
+    # Try experimental 2.0 flash first if available, then 1.5 variants, then legacy
+    fallback_models = [m for m in [
+        preferred,
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-pro",
+        "gemini-1.5-pro-latest",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-pro"
+    ] if m]
 
+    last_err = None
+    for name in fallback_models:
+        try:
+            model = genai.GenerativeModel(
+                model_name=name,
+                generation_config=generation_config,
+                safety_settings=safety_settings,
+            )
+            logging.info(f"Using Gemini model: {name}")
+            return model, name
+        except Exception as e:
+            logging.warning(f"Failed to init model '{name}': {e}")
+            last_err = e
+
+    # If no model succeeded, raise the last error for upstream handling
+    raise RuntimeError(f"Unable to initialize any Gemini model. Last error: {last_err}")
+
+# ====== Legacy/Expanded Schema & Transformation Utilities (from prior implementation) ======
 INPUT_CONTRACT_V1 = {
     "type": "object",
     "required": ["user", "questionnaire", "equipment", "pantry", "availability", "week_start", "timezone"],
@@ -275,116 +288,41 @@ WEEKLY_PLAN_V1 = {
     }
 }
 
-
-def clean_json_response(response_text):
-    """Clean markdown formatting from API response text"""
+def clean_json_response(response_text: str) -> str:
     response_text = response_text.strip()
     if response_text.startswith("```json"):
-        response_text = response_text[7:]  # Remove ```json
+        response_text = response_text[7:]
     if response_text.startswith("```"):
-        response_text = response_text[3:]  # Remove ```
+        response_text = response_text[3:]
     if response_text.endswith("```"):
-        response_text = response_text[:-3]  # Remove trailing ```
+        response_text = response_text[:-3]
     return response_text.strip()
 
-
-def transform_api_response(plan):
-    """Transform API response to match our expected schema"""
-    # Handle nested structure
+def transform_api_response(plan: dict) -> dict:
+    # Unwrap nested key if present
     if "weekly_plan" in plan:
         plan = plan["weekly_plan"]
-    
-    # Fix field name mapping
+
     if "start_date" in plan and "week_start" not in plan:
         plan["week_start"] = plan["start_date"]
-        
-    # Ensure days array exists and transform workout data
-    if "days" in plan:
-        for day in plan["days"]:
-            if "workout" in day:
-                workout = day["workout"]
-                # Ensure required workout fields exist
-                if "start" not in workout:
-                    workout["start"] = "18:00"  # Default to evening
-                if "duration_min" not in workout:
-                    workout["duration_min"] = 60  # Default duration
-                if "location" not in workout:
-                    workout["location"] = "home"  # Default location
-                if "blocks" not in workout:
-                    workout["blocks"] = []
-                if "intensity_note" not in workout:
-                    workout["intensity_note"] = "Moderate intensity"
-                
-                # Handle fallbacks conversion
-                if "fallbacks" not in workout:
-                    workout["fallbacks"] = []
-                elif isinstance(workout["fallbacks"], str):
-                    # Split by commas if it's a comma-separated string
-                    if "," in workout["fallbacks"]:
-                        workout["fallbacks"] = [f.strip() for f in workout["fallbacks"].split(",")]
-                    else:
-                        workout["fallbacks"] = [workout["fallbacks"]]
-                elif not isinstance(workout["fallbacks"], list):
-                    workout["fallbacks"] = [str(workout["fallbacks"])]
-                
-                # Ensure workout blocks have correct types
-                if "blocks" in workout:
-                    for block in workout["blocks"]:
-                        # Convert reps to string if it's not already
-                        if "reps" in block and not isinstance(block["reps"], str):
-                            block["reps"] = str(block["reps"])
-                        # Ensure other required fields have correct types
-                        if "sets" in block and not isinstance(block["sets"], int):
-                            try:
-                                block["sets"] = int(block["sets"])
-                            except (ValueError, TypeError):
-                                block["sets"] = 3  # Default value if conversion fails
-                        if "rest_sec" in block and not isinstance(block["rest_sec"], int):
-                            try:
-                                block["rest_sec"] = int(block["rest_sec"])
-                            except (ValueError, TypeError):
-                                block["rest_sec"] = 60  # Default value if conversion fails
-    
-    # Transform days structure
+
     if "days" in plan:
         for i, day in enumerate(plan["days"]):
-            # Fix date field - convert day name to actual date or add missing date
+            # Ensure date exists
             if "date" not in day:
-                if "day" in day:
-                    # Calculate the actual date based on week_start and day index
-                    try:
-                        week_start_str = plan.get("week_start", "2025-10-20")
-                        week_start = datetime.strptime(week_start_str, "%Y-%m-%d")
-                        day_date = week_start + timedelta(days=i)
-                        day["date"] = day_date.strftime("%Y-%m-%d")
-                    except Exception as e:
-                        # Fallback to a default date
-                        print(f"Date calculation error: {e}")
-                        day["date"] = f"2025-10-{20 + i}"
-                else:
-                    # No day field either, create a default date
-                    try:
-                        week_start_str = plan.get("week_start", "2025-10-20")
-                        week_start = datetime.strptime(week_start_str, "%Y-%m-%d")
-                        day_date = week_start + timedelta(days=i)
-                        day["date"] = day_date.strftime("%Y-%m-%d")
-                    except:
-                        day["date"] = f"2025-10-{20 + i}"
-            
-            # Transform workout structure
-            if "workouts" in day:  # Handle case where API returns array of workouts
-                # Take the first workout if multiple are provided
-                workout = day["workouts"][0] if isinstance(day["workouts"], list) and len(day["workouts"]) > 0 else {
-                    "start": "18:00",
-                    "duration_min": 60,
-                    "location": "home",
-                    "blocks": [],
-                    "intensity_note": "Rest day",
-                    "fallbacks": []
-                }
-                day["workout"] = workout
+                try:
+                    ws = plan.get("week_start") or datetime.utcnow().strftime("%Y-%m-%d")
+                    base = datetime.strptime(ws, "%Y-%m-%d")
+                    day["date"] = (base + timedelta(days=i)).strftime("%Y-%m-%d")
+                except Exception:
+                    day["date"] = datetime.utcnow().strftime("%Y-%m-%d")
+
+            # Normalize workout
+            if "workouts" in day and "workout" not in day:
+                wk = day["workouts"][0] if isinstance(day["workouts"], list) and day["workouts"] else {}
+                day["workout"] = wk
                 del day["workouts"]
-            elif "workout" not in day:  # Create default workout if none exists
+            if "workout" not in day:
                 day["workout"] = {
                     "start": "18:00",
                     "duration_min": 60,
@@ -393,138 +331,98 @@ def transform_api_response(plan):
                     "intensity_note": "Rest day",
                     "fallbacks": []
                 }
-            
-            workout = day["workout"]
-            # Convert exercises to blocks format
-            if "exercises" in workout and "blocks" not in workout:
+            wk = day["workout"]
+            for fld, default in [
+                ("start", "18:00"),
+                ("duration_min", 60),
+                ("location", "home"),
+                ("blocks", []),
+                ("intensity_note", "Moderate intensity"),
+                ("fallbacks", [])
+            ]:
+                if fld not in wk:
+                    wk[fld] = default
+            # Normalize fallbacks
+            if isinstance(wk.get("fallbacks"), str):
+                fb = wk["fallbacks"]
+                wk["fallbacks"] = [s.strip() for s in fb.split(",")] if "," in fb else [fb]
+            elif not isinstance(wk.get("fallbacks"), list):
+                wk["fallbacks"] = [str(wk["fallbacks"])]
+
+            # Convert exercises -> blocks if needed
+            if "exercises" in wk and not wk.get("blocks"):
                 blocks = []
-                for exercise in workout["exercises"]:
-                    block = {
-                        "name": exercise["name"],
-                        "sets": exercise.get("sets", 3),
-                        "reps": str(exercise.get("reps", "10")),
-                        "rest_sec": exercise.get("rest_sec", 60)
-                    }
-                    blocks.append(block)
-                workout["blocks"] = blocks
-                
-                # Ensure blocks have correct data types
-                if "blocks" in workout:
-                    for block in workout["blocks"]:
-                        if "reps" in block and not isinstance(block["reps"], str):
-                            block["reps"] = str(block["reps"])
-                        if "sets" in block and not isinstance(block["sets"], int):
-                            try:
-                                block["sets"] = int(block["sets"])
-                            except:
-                                block["sets"] = 3  # Default
-                        if "rest_sec" in block and not isinstance(block["rest_sec"], int):
-                            try:
-                                block["rest_sec"] = int(block["rest_sec"])
-                            except:
-                                block["rest_sec"] = 60  # Default
-                
-                # Add missing required fields and ensure correct types
-                if "start" not in workout:
-                    workout["start"] = "18:00"  # Default time
-                if "duration_min" not in workout:
-                    workout["duration_min"] = 60  # Default duration
-                elif not isinstance(workout["duration_min"], int):
+                for ex in wk["exercises"]:
+                    blocks.append({
+                        "name": ex.get("name", "Exercise"),
+                        "sets": int(ex.get("sets", 3)) if str(ex.get("sets", "")).isdigit() else 3,
+                        "reps": str(ex.get("reps", "10")),
+                        "rest_sec": int(ex.get("rest_sec", 60)) if str(ex.get("rest_sec", "")).isdigit() else 60
+                    })
+                wk["blocks"] = blocks
+
+            # Ensure blocks types
+            for b in wk.get("blocks", []):
+                if not isinstance(b.get("reps"), str):
+                    b["reps"] = str(b.get("reps"))
+                if not isinstance(b.get("sets"), int):
                     try:
-                        workout["duration_min"] = int(workout["duration_min"])
-                    except:
-                        workout["duration_min"] = 60
-                if "intensity_note" not in workout:
-                    workout["intensity_note"] = "Moderate intensity"
-                elif not isinstance(workout["intensity_note"], str):
-                    workout["intensity_note"] = str(workout["intensity_note"])
-                if "location" not in workout:
-                    workout["location"] = "home"  # Default location
-                elif not isinstance(workout["location"], str):
-                    workout["location"] = str(workout["location"]).lower()
-                if "blocks" not in workout:
-                    workout["blocks"] = []  # Default empty blocks for rest day
-                # Ensure fallbacks is always a properly formatted array of strings
-                if "fallbacks" not in workout:
-                    workout["fallbacks"] = []
-                elif isinstance(workout["fallbacks"], str):
-                    # Split string by commas or convert single string to array
-                    if "," in workout["fallbacks"]:
-                        workout["fallbacks"] = [s.strip() for s in workout["fallbacks"].split(",")]
-                    else:
-                        workout["fallbacks"] = [workout["fallbacks"]]
-                elif isinstance(workout["fallbacks"], list):
-                    # Ensure all items in the array are strings
-                    workout["fallbacks"] = [str(item) for item in workout["fallbacks"]]
-                else:
-                    # Convert any other type to a string and wrap in array
-                    workout["fallbacks"] = [str(workout["fallbacks"])]
-            
-            # Transform meals structure
-            if "meals" in day:
-                for meal in day["meals"]:
-                    # Convert ingredients from objects to strings
-                    if "ingredients" in meal:
-                        ingredients = meal["ingredients"]
-                        if isinstance(ingredients, list) and len(ingredients) > 0:
-                            if isinstance(ingredients[0], dict):
-                                # Convert from object format to string format
-                                ingredient_strings = []
-                                for ing in ingredients:
-                                    if "name" in ing:
-                                        qty = ing.get("qty", "1")
-                                        unit = ing.get("unit", "")
-                                        if unit:
-                                            ingredient_strings.append(f"{ing['name']} ({qty} {unit})")
-                                        else:
-                                            ingredient_strings.append(ing['name'])
-                                meal["ingredients"] = ingredient_strings
-                    
-                    # Add missing required fields
-                    if "time" not in meal:
-                        meal["time"] = "Breakfast"  # Default time
-                    if "macro_note" not in meal:
-                        meal["macro_note"] = "Balanced macros"
-                    
-                    # Ensure ingredients is always an array
-                    if "ingredients" not in meal:
-                        meal["ingredients"] = []
-                    elif isinstance(meal["ingredients"], str):
-                        meal["ingredients"] = [meal["ingredients"]]
-                    elif not isinstance(meal["ingredients"], list):
-                        meal["ingredients"] = []
-            
-            # Transform recovery structure
-            if "recovery" in day:
-                recovery = day["recovery"]
-                if "sleep_hours" in recovery and "sleep_target_hr" not in recovery:
-                    recovery["sleep_target_hr"] = recovery["sleep_hours"]
-                if "hydration_liters" in recovery and "hydration_l" not in recovery:
-                    recovery["hydration_l"] = recovery["hydration_liters"]
-                if "mobility_min" not in recovery:
-                    recovery["mobility_min"] = 10  # Default mobility time
-                
-                # Ensure correct data types for recovery fields
-                if "sleep_target_hr" in recovery and not isinstance(recovery["sleep_target_hr"], (int, float)):
+                        b["sets"] = int(b.get("sets", 3))
+                    except Exception:
+                        b["sets"] = 3
+                if not isinstance(b.get("rest_sec"), int):
                     try:
-                        recovery["sleep_target_hr"] = float(recovery["sleep_target_hr"])
-                    except:
-                        recovery["sleep_target_hr"] = 8.0
-                if "mobility_min" in recovery and not isinstance(recovery["mobility_min"], int):
-                    try:
-                        recovery["mobility_min"] = int(recovery["mobility_min"])
-                    except:
-                        recovery["mobility_min"] = 10
-                if "hydration_l" in recovery and not isinstance(recovery["hydration_l"], (int, float)):
-                    try:
-                        recovery["hydration_l"] = float(recovery["hydration_l"])
-                    except:
-                        recovery["hydration_l"] = 3.0
-    
-    # Transform summary structure
+                        b["rest_sec"] = int(b.get("rest_sec", 60))
+                    except Exception:
+                        b["rest_sec"] = 60
+
+            # Meals normalization
+            for meal in day.get("meals", []):
+                if "ingredients" in meal and meal["ingredients"] and isinstance(meal["ingredients"][0], dict):
+                    ing_strings = []
+                    for ing in meal["ingredients"]:
+                        nm = ing.get("name")
+                        qty = ing.get("qty") or ing.get("qty_unit") or "1"
+                        unit = ing.get("unit", "")
+                        if nm:
+                            ing_strings.append(f"{nm} ({qty}{(' ' + unit) if unit else ''})".strip())
+                    meal["ingredients"] = ing_strings
+                if "ingredients" not in meal:
+                    meal["ingredients"] = []
+                elif isinstance(meal["ingredients"], str):
+                    meal["ingredients"] = [meal["ingredients"]]
+                if "time" not in meal:
+                    meal["time"] = "Breakfast"
+                if "macro_note" not in meal:
+                    meal["macro_note"] = "Balanced macros"
+
+            # Recovery normalization
+            rec = day.get("recovery") or {}
+            day["recovery"] = rec
+            if "sleep_hours" in rec and "sleep_target_hr" not in rec:
+                rec["sleep_target_hr"] = rec["sleep_hours"]
+            if "hydration_liters" in rec and "hydration_l" not in rec:
+                rec["hydration_l"] = rec["hydration_liters"]
+            rec.setdefault("mobility_min", 10)
+            # type coercion
+            try:
+                if "sleep_target_hr" in rec and not isinstance(rec["sleep_target_hr"], (int, float)):
+                    rec["sleep_target_hr"] = float(rec["sleep_target_hr"])
+            except Exception:
+                rec["sleep_target_hr"] = 8.0
+            try:
+                if not isinstance(rec.get("mobility_min"), int):
+                    rec["mobility_min"] = int(rec.get("mobility_min", 10))
+            except Exception:
+                rec["mobility_min"] = 10
+            try:
+                if "hydration_l" in rec and not isinstance(rec["hydration_l"], (int, float)):
+                    rec["hydration_l"] = float(rec["hydration_l"])
+            except Exception:
+                rec["hydration_l"] = 3.0
+
     if "summary" not in plan:
         plan["summary"] = {}
-    
     summary = plan["summary"]
     if "grocery_gap" not in summary:
         summary["grocery_gap"] = []
@@ -532,43 +430,33 @@ def transform_api_response(plan):
         summary["grocery_gap"] = [summary["grocery_gap"]]
     elif not isinstance(summary["grocery_gap"], list):
         summary["grocery_gap"] = []
-    
     if "total_training_min" not in summary:
-        # Calculate total training time
-        total_min = 0
-        if "days" in plan:
-            for day in plan["days"]:
-                if "workout" in day and "duration_min" in day["workout"]:
-                    total_min += day["workout"]["duration_min"]
-        summary["total_training_min"] = total_min
-    elif not isinstance(summary["total_training_min"], int):
+        total = 0
+        for d in plan.get("days", []):
+            try:
+                total += int(d.get("workout", {}).get("duration_min", 0))
+            except Exception:
+                pass
+        summary["total_training_min"] = total
+    else:
         try:
-            summary["total_training_min"] = int(summary["total_training_min"])
-        except:
+            summary["total_training_min"] = int(summary.get("total_training_min", 0))
+        except Exception:
             summary["total_training_min"] = 0
-    
     if "notes" not in summary:
         summary["notes"] = "Generated weekly plan"
-    elif not isinstance(summary["notes"], str):
-        summary["notes"] = str(summary["notes"])
-    
-    # Add justification if missing
     if "justification" not in plan:
         plan["justification"] = "AI-generated personalized fitness and nutrition plan based on your profile and preferences."
-    
     return plan
 
-
 def validate_input(input_data):
+    """Primary validation using JSON Schema; returns (bool, error_dict_or_None)."""
     try:
+        # Build an input wrapper to match schema requirement of 'user'
         jsonschema.validate(instance=input_data, schema=INPUT_CONTRACT_V1)
         return True, None
     except jsonschema.exceptions.ValidationError as e:
-        missing_fields = []
-        if e.validator == 'required':
-            missing_fields = e.message.split("'")
-        return False, {"status": "INFO_NEEDED", "missing_fields": missing_fields, "message": str(e)}
-
+        return False, {"status": "INFO_NEEDED", "message": str(e)}
 
 def generate_weekly_plan(input_data):
     is_valid, error = validate_input(input_data)
@@ -628,156 +516,283 @@ Must have: grocery_gap (array of strings), total_training_min (integer), notes (
 
 IMPORTANT: Return ONLY the JSON object with the exact structure above. Do not wrap in any container object."""
 
-    user_prompt = f"""Generate a weekly plan starting {week_start} for timezone {timezone}.
-
-User profile:
-- Bio: {questionnaire.get('bio_json', {})}
-- Goals: {questionnaire.get('goals_json', {})}
-- Diet: {questionnaire.get('diet_json', {})}
-- Allergens: {questionnaire.get('allergens_json', [])}
-- Gym frequency: {gym_frequency}
-- Grocery frequency: {grocery_frequency}
-
-Equipment: {equipment.get('items', [])}
-Pantry: {json.dumps(pantry.get('items', []), indent=2)}
-Free blocks: {availability.get('free_blocks', [])}
-
-Return ONLY the JSON object following weekly_plan_v1 schema with all 7 days populated. No markdown formatting."""
-
+    user_prompt = f"""Generate a weekly plan starting {week_start} for timezone {timezone}."""
+    
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        
-        # Combine system and user prompts for Gemini
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=8192,
-                temperature=0.7
-            )
-        )
-        
-        # Check if response is empty or None
-        if not response or not response.text:
-            return {"status": "ERROR", "message": "Empty response from Google Gemini API. Please check your API key and try again."}
-        
-        # Log the raw response for debugging
-        print(f"Raw API response: {response.text[:500]}...")  # First 500 chars for debugging
-        
-        # Clean the response text - remove markdown code blocks if present
-        response_text = clean_json_response(response.text)
-        
+        model, model_name = setup_genai()
+
+        # Newer SDKs don't require explicit role structs for simple generation; keep system context concise.
+        composite_prompt = f"{system_prompt}\n\n{user_prompt}"
+        response = model.generate_content(composite_prompt)
+
+        # Defensive extraction of text
+        raw_text = None
         try:
-            plan = json.loads(response_text)
+            # Prefer aggregated text property if available
+            raw_text = getattr(response, "text", None)
+            if not raw_text and response.candidates and response.candidates[0].content.parts:
+                # Fallback to first part text
+                raw_text = response.candidates[0].content.parts[0].text
+        except Exception:
+            pass
+
+        if not raw_text:
+            return {
+                "status": "ERROR",
+                "message": "No response text generated",
+                "model": model_name
+            }
+
+        # Attempt to isolate JSON if model added stray commentary
+        cleaned = raw_text.strip()
+        # If fenced code block exists, extract inside
+        if cleaned.startswith("```"):
+            # Remove triple backticks and possible language hint
+            cleaned_lines = cleaned.splitlines()
+            # Drop first and last fence line
+            cleaned_core = [ln for ln in cleaned_lines[1:-1] if not ln.startswith("```")]
+            cleaned = "\n".join(cleaned_core).strip()
+
+        # Trim any leading non-json preamble
+        first_brace = cleaned.find("{")
+        last_brace = cleaned.rfind("}")
+        if first_brace != -1 and last_brace != -1:
+            candidate_json = cleaned[first_brace:last_brace+1]
+        else:
+            candidate_json = cleaned
+
+        try:
+            plan_json = json.loads(candidate_json)
         except json.JSONDecodeError as e:
-            return {"status": "ERROR", "message": f"Invalid JSON response from API: {str(e)}. Raw response: {response_text[:200]}..."}
-        
-        # Transform the API response to match our schema
-        print(f"Before transformation - plan keys: {list(plan.keys())}")
-        if "days" in plan:
-            print(f"First day keys: {list(plan['days'][0].keys()) if plan['days'] else 'No days'}")
-        
-        plan = transform_api_response(plan)
-        
-        print(f"After transformation - plan keys: {list(plan.keys())}")
-        if "days" in plan:
-            print(f"First day keys: {list(plan['days'][0].keys()) if plan['days'] else 'No days'}")
-        
+            return {
+                "status": "ERROR",
+                "message": f"Invalid JSON response: {e}",
+                "model": model_name,
+                "raw_response": raw_text[:2000]  # truncate for safety
+            }
+
+        # Lightweight schema sanity (presence of required top-level keys)
+        required_top = ["week_start", "days", "summary", "justification"]
+        missing = [k for k in required_top if k not in plan_json]
+        if missing:
+            return {
+                "status": "ERROR",
+                "message": f"JSON missing required keys: {', '.join(missing)}",
+                "model": model_name,
+                "raw_response": raw_text[:2000]
+            }
+
+        # Transform & validate against extended schema for robustness
+        transformed = transform_api_response(plan_json)
         try:
-            jsonschema.validate(instance=plan, schema=WEEKLY_PLAN_V1)
+            jsonschema.validate(instance=transformed, schema=WEEKLY_PLAN_V1)
         except jsonschema.exceptions.ValidationError as e:
-            return {"status": "ERROR", "message": f"Generated plan invalid: {str(e)}"}
-        
-        return plan
-    
+            return {
+                "status": "ERROR",
+                "message": f"Generated plan invalid schema: {e.message}",
+                "model": model_name,
+                "raw_response": raw_text[:1000]
+            }
+        return transformed
+
     except Exception as e:
-        return {"status": "ERROR", "message": f"Failed to generate plan: {str(e)}"}
+        return {
+            "status": "ERROR",
+            "message": f"Error generating plan: {str(e)}",
+            "model_attempt": os.environ.get("GEMINI_MODEL")
+        }
 
+def adapt_plan(current_plan, adherence_logs=None, pantry_delta=None):
+    """
+    Lightweight local adaptation function for weekly plans.
+    - current_plan: dict (the plan JSON produced by generate_weekly_plan)
+    - adherence_logs: list of dicts with keys: date, workout_done, rpe, soreness, meals_done
+    - pantry_delta: optional dict with pantry info, e.g. {"items": [...], "days_until_shopping": N}
 
-def adapt_plan(current_plan, adherence_logs, pantry_delta=None, schedule_delta=None):
-    system_prompt = """You are adapting an existing weekly plan based on user adherence and changes.
-
-ADAPTATION RULES:
-1. If soreness > 7 or RPE consistently > 8: reduce next workout intensity by 20%, swap HIIT for LISS
-2. If pantry items depleted: swap recipes with available pantry alternatives maintaining macros
-3. If schedule changed: reschedule workouts to new free blocks
-4. Maintain weekly training volume when possible
-5. Return JSON with days_patch array and reason
-
-Return format:
-{
-  "days_patch": [
-    {
-      "date": "2025-01-15",
-      "workout_delta": {"intensity_note": "Reduced due to high soreness"},
-      "meals_delta": {"meal_0": {"ingredients": ["new", "items"]}}
-    }
-  ],
-  "reason": "Brief explanation"
-}"""
-
-    user_prompt = f"""Current plan summary: {json.dumps(current_plan.get('summary', {}), indent=2)}
-
-Recent adherence: {json.dumps(adherence_logs, indent=2)}
-Pantry changes: {json.dumps(pantry_delta, indent=2) if pantry_delta else 'None'}
-Schedule changes: {json.dumps(schedule_delta, indent=2) if schedule_delta else 'None'}
-
-Adapt the plan for remaining days."""
-
+    Returns dict with keys:
+    - status: "ADAPTED" or "NO_CHANGE" or "ERROR"
+    - reason: human-readable reason
+    - days_patch: list of { "date": "YYYY-MM-DD", "patch": {...} } (partial updates)
+    - new_plan (optional): full updated plan (only included when convenient)
+    """
     try:
-        model = genai.GenerativeModel('gemini-pro')
-        
-        # Combine system and user prompts for Gemini
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=4096,
-                temperature=0.7
-            )
-        )
-        
-        # Clean the response text - remove markdown code blocks if present
-        response_text = clean_json_response(response.text)
-        
-        return json.loads(response_text)
-    
+        if adherence_logs is None:
+            adherence_logs = []
+
+        days_patch = []
+        reason_parts = []
+
+        # Simple rule: if many recent high soreness or high RPE -> reduce intensity/duration
+        high_soreness_count = sum(1 for l in adherence_logs if l.get("soreness") and l.get("soreness") >= 8)
+        high_rpe_count = sum(1 for l in adherence_logs if l.get("rpe") and l.get("rpe") >= 9)
+
+        # Helper to reduce a workout block
+        def reduce_workout_block(block):
+            new_block = dict(block)
+            # Reduce sets by 1 if >1, otherwise reduce reps by ~20%
+            try:
+                if isinstance(new_block.get("sets"), int) and new_block["sets"] > 1:
+                    new_block["sets"] = max(1, new_block["sets"] - 1)
+                else:
+                    # try to reduce reps (could be "8-12" or int)
+                    reps = new_block.get("reps")
+                    if isinstance(reps, int):
+                        new_block["reps"] = max(1, int(reps * 0.8))
+                    elif isinstance(reps, str) and "-" in reps:
+                        parts = reps.split("-")
+                        try:
+                            lo = int(parts[0])
+                            hi = int(parts[1])
+                            new_lo = max(1, int(lo * 0.8))
+                            new_hi = max(new_lo, int(hi * 0.8))
+                            new_block["reps"] = f"{new_lo}-{new_hi}"
+                        except:
+                            pass
+                # Increase rest if present
+                if isinstance(new_block.get("rest_sec"), int):
+                    new_block["rest_sec"] = int(new_block["rest_sec"] * 1.25)
+            except Exception:
+                pass
+            return new_block
+
+        # If soreness or RPE flags: create patches for future days
+        if high_soreness_count >= 2 or high_rpe_count >= 2:
+            reason_parts.append("High recent soreness/RPE detected — reducing upcoming training load.")
+            today = datetime.utcnow().date()
+            for day in current_plan.get("days", []):
+                # Patch only for days >= today
+                try:
+                    day_date = datetime.fromisoformat(day.get("date")).date()
+                except Exception:
+                    # if date parsing fails, skip
+                    continue
+                if day_date >= today:
+                    patch = {}
+                    workout = day.get("workout", {})
+                    if workout:
+                        new_workout = dict(workout)
+                        # reduce total duration by ~25%
+                        if isinstance(new_workout.get("duration_min"), int):
+                            new_workout["duration_min"] = max(5, int(new_workout["duration_min"] * 0.75))
+                        # reduce blocks
+                        new_blocks = []
+                        for b in new_workout.get("blocks", []):
+                            new_blocks.append(reduce_workout_block(b))
+                        new_workout["blocks"] = new_blocks
+                        # add a recovery note/intensity change
+                        new_workout["intensity_note"] = "Reduced intensity for recovery"
+                        patch["workout"] = new_workout
+                    if patch:
+                        days_patch.append({
+                            "date": day.get("date"),
+                            "patch": patch
+                        })
+
+        # Pantry delta handling: try to detect missing ingredients and produce grocery_gap
+        pantry_gaps = []
+        if pantry_delta:
+            pantry_items = [item.get("name", "").lower() for item in pantry_delta.get("items", [])]
+            for day in current_plan.get("days", []):
+                for meal in day.get("meals", []):
+                    for ing in meal.get("ingredients", []):
+                        if isinstance(ing, str):
+                            ing_name = ing.lower()
+                            # simple containment check
+                            found = any(p in ing_name or ing_name in p for p in pantry_items)
+                            if not found and ing not in pantry_gaps:
+                                pantry_gaps.append(ing)
+            if pantry_gaps:
+                reason_parts.append("Pantry update indicates missing ingredients.")
+                # Build a simple patch that adds grocery_gap to summary
+                days_patch.append({
+                    "date": None,
+                    "patch": {
+                        "summary_update": {
+                            "grocery_gap": pantry_gaps
+                        }
+                    }
+                })
+
+        if not days_patch:
+            return {"status": "NO_CHANGE", "reason": "No adaptation rules triggered", "days_patch": []}
+
+        reason_text = " | ".join(reason_parts) if reason_parts else "Adaptation applied"
+        # Optionally build a full new_plan by applying patches (lightweight)
+        new_plan = dict(current_plan)
+        if any(p.get("date") for p in days_patch):
+            # apply only date-specific patches
+            for dpatch in days_patch:
+                d = dpatch.get("date")
+                if not d:
+                    continue
+                for day in new_plan.get("days", []):
+                    if day.get("date") == d:
+                        day_patch = dpatch.get("patch", {})
+                        # shallow-merge workout if present
+                        if "workout" in day_patch:
+                            day["workout"] = day_patch["workout"]
+                        # could merge other parts as needed
+
+        # If there was a summary update patch (grocery gaps), merge it
+        for dpatch in days_patch:
+            if dpatch.get("date") is None:
+                s_upd = dpatch.get("patch", {}).get("summary_update")
+                if s_upd:
+                    if "summary" not in new_plan:
+                        new_plan["summary"] = {}
+                    new_plan["summary"].setdefault("grocery_gap", [])
+                    # extend without duplicates
+                    for it in s_upd.get("grocery_gap", []):
+                        if it not in new_plan["summary"]["grocery_gap"]:
+                            new_plan["summary"]["grocery_gap"].append(it)
+
+        return {
+            "status": "ADAPTED",
+            "reason": reason_text,
+            "days_patch": days_patch,
+            "new_plan": new_plan
+        }
+
     except Exception as e:
-        return {"status": "ERROR", "message": f"Failed to adapt plan: {str(e)}"}
+        return {"status": "ERROR", "reason": str(e), "days_patch": []}
 
 
 def regenerate_day(input_data, target_date, reason=""):
-    system_prompt = f"""Generate a single day's workout and meals.
+    """Regenerate a single day using the same model selection + schema utilities."""
+    # Provide a concise system prompt; reuse constraints for one day
+    system_prompt = f"""You are a fitness and nutrition planning expert. Generate one day plan JSON only.
+Constraints mirrored from weekly plan: valid JSON, fields: date, workout, meals, recovery.
+Workout: start, duration_min, location, blocks[], intensity_note, fallbacks[].
+Each block: name, sets, reps, rest_sec.
+Meals: time, name, ingredients[], macro_note, optional recipe_steps[].
+Recovery: sleep_target_hr, mobility_min, hydration_l.
+Return ONLY JSON for a single day, no markdown.
+"""
 
-Follow same constraints as weekly plan generation.
-Reason for regeneration: {reason}
-
-Return JSON matching single day from weekly_plan_v1 schema."""
-
-    user_prompt = f"""Regenerate plan for date {target_date}.
-
-Context: {json.dumps(input_data, indent=2)}"""
+    user_prompt = f"Regenerate date {target_date} (reason: {reason}). Context: {json.dumps(input_data)[:1500]}"
 
     try:
-        model = genai.GenerativeModel('gemini-pro')
-        
-        # Combine system and user prompts for Gemini
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                max_output_tokens=4096,
-                temperature=0.7
-            )
-        )
-        
-        # Clean the response text - remove markdown code blocks if present
-        response_text = clean_json_response(response.text)
-        
-        return json.loads(response_text)
-    
+        model, model_name = setup_genai()
+        composite = f"{system_prompt}\n\n{user_prompt}"
+        response = model.generate_content(composite)
+        raw = getattr(response, "text", "") or ""
+        cleaned = clean_json_response(raw)
+        first = cleaned.find("{"); last = cleaned.rfind("}")
+        if first != -1 and last != -1:
+            cleaned = cleaned[first:last+1]
+        try:
+            day_json = json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            return {"status": "ERROR", "message": f"Invalid JSON day: {e}", "raw": raw[:800], "model": model_name}
+
+        # Minimal normalization via transform_api_response expecting a full plan; wrap fake container
+        wrapper = {"week_start": target_date, "days": [day_json], "summary": {"notes": "Temp"}, "justification": "Single day regen"}
+        wrapper = transform_api_response(wrapper)
+        try:
+            # Validate that the single day now conforms
+            jsonschema.validate(instance=wrapper, schema=WEEKLY_PLAN_V1)
+        except jsonschema.exceptions.ValidationError as e:
+            return {"status": "ERROR", "message": f"Day schema invalid: {e.message}", "model": model_name}
+        return {"status": "OK", "day": wrapper["days"][0], "model": model_name}
     except Exception as e:
-        return {"status": "ERROR", "message": f"Failed to regenerate day: {str(e)}"}
+        return {"status": "ERROR", "message": str(e)}

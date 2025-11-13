@@ -57,7 +57,7 @@ with col2:
     st.info(f"🏋️ Gym Access: **{questionnaire.gym_frequency}**")
     st.info(f"🛒 Grocery Frequency: **{questionnaire.grocery_frequency}**")
 
-if st.button("🤖 Generate Weekly Plan", type="primary", use_container_width=True):
+if st.button("🤖 Generate Weekly Plan", type="primary", width="stretch"):
     with st.spinner("🔮 AI is crafting your personalized plan..."):
         input_data = {
             "user": {
@@ -107,6 +107,20 @@ if st.button("🤖 Generate Weekly Plan", type="primary", use_container_width=Tr
             st.session_state.current_plan = plan
             st.success("✅ Weekly plan generated successfully!")
             st.balloons()
+            
+            # Add navigation section
+            st.markdown("---")
+            st.markdown("""
+            <div style='text-align: center; padding: 1rem;'>
+                <h4>🎯 Next Step: Today's Plan</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Center the button using columns
+            col1, col2, col3 = st.columns([2, 1, 2])
+            with col2:
+                if st.button("Continue to Today →", type="primary", width="stretch"):
+                    st.switch_page("pages/06_today.py")
 
 st.markdown("---")
 

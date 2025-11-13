@@ -123,7 +123,7 @@ with col2:
 
 with col3:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("➕ Add Item", use_container_width=True):
+    if st.button("➕ Add Item", width="stretch"):
         # Use selected_common if it's not empty, otherwise use the custom input
         final_item_name = selected_common if selected_common else item_name
         if final_item_name.strip() and qty_unit.strip():
@@ -135,9 +135,10 @@ with col3:
 
 st.markdown("---")
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns([2, 1, 2])
+
 with col1:
-    if st.button("💾 Save Pantry", type="primary", use_container_width=True):
+    if st.button("💾 Save Pantry", type="primary", width="stretch"):
         items_json = {"items": st.session_state.pantry_items}
         
         if existing:
@@ -154,11 +155,17 @@ with col1:
             db.add(new_pantry)
         
         db.commit()
+        st.session_state.pantry_saved = True
         st.success("✅ Pantry saved successfully!")
-        st.info("👉 Next: Set your schedule in the **Schedule** page")
 
+# Continue button in the middle column
 with col2:
-    if st.button("🔄 Mid-Week Restock & Replan", use_container_width=True):
+    if st.button("Continue to Schedule →", type="primary", width="stretch", key="continue_schedule"):
+        st.switch_page("pages/04_schedule.py")
+
+# Restock button in the right column
+with col3:
+    if st.button("🔄 Mid-Week Restock & Replan", width="stretch"):
         if st.session_state.pantry_items:
             items_json = {"items": st.session_state.pantry_items}
             
@@ -188,5 +195,14 @@ with col2:
                     st.info(f"ℹ️ {message}")
         else:
             st.warning("⚠️ Add pantry items first!")
+
+# Add navigation section with proper spacing
+st.write("")  # Add some space
+st.markdown("""
+<div style='background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 10px; text-align: center; margin: 1rem 0;'>
+    <h3 style='margin-bottom: 1rem;'>🎯 Next Step: Schedule Setup</h3>
+    <p style='color: #b8c0cc; margin-bottom: 1rem;'>Set your meal and workout schedule</p>
+</div>
+""", unsafe_allow_html=True)
 
 db.close()

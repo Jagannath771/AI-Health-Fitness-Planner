@@ -47,7 +47,7 @@ df_logs = pd.DataFrame([
     for log in logs[:30]
 ])
 
-st.dataframe(df_logs, use_container_width=True, hide_index=True)
+st.dataframe(df_logs, width="stretch", hide_index=True)
 
 st.markdown("---")
 st.subheader("📈 Trends")
@@ -75,7 +75,7 @@ if len(logs) >= 2:
                 markers=True
             )
             fig_rpe.update_layout(yaxis_range=[0, 10])
-            st.plotly_chart(fig_rpe, use_container_width=True)
+            st.plotly_chart(fig_rpe, width="stretch")
         else:
             st.info("Not enough RPE data to display trend.")
     
@@ -89,7 +89,7 @@ if len(logs) >= 2:
                 markers=True
             )
             fig_soreness.update_layout(yaxis_range=[0, 10])
-            st.plotly_chart(fig_soreness, use_container_width=True)
+            st.plotly_chart(fig_soreness, width="stretch")
         else:
             st.info("Not enough soreness data to display trend.")
     
@@ -102,7 +102,7 @@ if len(logs) >= 2:
             labels={"Workout Done": "Completed (1=Yes, 0=No)"}
         )
         fig_adherence.update_layout(yaxis_range=[0, 1.2])
-        st.plotly_chart(fig_adherence, use_container_width=True)
+        st.plotly_chart(fig_adherence, width="stretch")
         
         last_7_days = df_chart.tail(7)
         last_7_adherence = (last_7_days["Workout Done"].sum() / len(last_7_days) * 100) if len(last_7_days) > 0 else 0

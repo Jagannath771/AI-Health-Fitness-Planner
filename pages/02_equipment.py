@@ -110,20 +110,37 @@ with col2:
 
 st.markdown("---")
 
-if st.button("💾 Save Equipment", type="primary", use_container_width=True):
-    items_json = {"items": st.session_state.equipment_items}
-    
-    if existing:
-        existing.items_json = items_json
-    else:
-        new_eq = Equipment(
-            user_id=st.session_state.user_id,
-            items_json=items_json
-        )
-        db.add(new_eq)
-    
-    db.commit()
-    st.success("✅ Equipment saved successfully!")
-    st.info("👉 Next: Update your pantry in the **Pantry** page")
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("💾 Save Equipment", type="primary", width="stretch"):
+        items_json = {"items": st.session_state.equipment_items}
+        
+        if existing:
+            existing.items_json = items_json
+        else:
+            new_eq = Equipment(
+                user_id=st.session_state.user_id,
+                items_json=items_json
+            )
+            db.add(new_eq)
+        
+        db.commit()
+        st.session_state.equipment_saved = True
+        st.success("✅ Equipment saved successfully!")
+
+with col2:
+    # Continue button
+    if st.button("Continue to Pantry →", type="primary", width="stretch", key="continue_pantry"):
+        st.switch_page("pages/03_pantry.py")
+
+# Add navigation section with proper spacing
+st.write("")  # Add some space
+st.markdown("""
+<div style='background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 10px; text-align: center; margin: 1rem 0;'>
+    <h3 style='margin-bottom: 1rem;'>🎯 Next Step: Pantry Setup</h3>
+    <p style='color: #b8c0cc; margin-bottom: 1rem;'>Add your available food items and groceries</p>
+</div>
+""", unsafe_allow_html=True)
 
 db.close()

@@ -52,7 +52,7 @@ with col3:
 
 with col4:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("➕ Add Block", use_container_width=True):
+    if st.button("➕ Add Block", width="stretch"):
         if start_time and end_time:
             new_block = {
                 "day": day,
@@ -67,40 +67,56 @@ st.subheader("Quick Add Templates")
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    if st.button("🌅 Morning Person (6-8 AM weekdays)", use_container_width=True):
+    if st.button("🌅 Morning Person (6-8 AM weekdays)", width="stretch"):
         for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
             st.session_state.free_blocks.append({"day": day, "start": "06:00", "end": "08:00"})
         st.rerun()
 
 with col2:
-    if st.button("🌆 Evening Person (6-8 PM weekdays)", use_container_width=True):
+    if st.button("🌆 Evening Person (6-8 PM weekdays)", width="stretch"):
         for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
             st.session_state.free_blocks.append({"day": day, "start": "18:00", "end": "20:00"})
         st.rerun()
 
 with col3:
-    if st.button("🎯 Weekend Warrior (Sat-Sun mornings)", use_container_width=True):
+    if st.button("🎯 Weekend Warrior (Sat-Sun mornings)", width="stretch"):
         st.session_state.free_blocks.append({"day": "Saturday", "start": "08:00", "end": "12:00"})
         st.session_state.free_blocks.append({"day": "Sunday", "start": "08:00", "end": "12:00"})
         st.rerun()
 
 st.markdown("---")
 
-if st.button("💾 Save Schedule", type="primary", use_container_width=True):
-    free_blocks_json = {"free_blocks": st.session_state.free_blocks}
-    
-    if existing:
-        existing.free_blocks_json = free_blocks_json
-    else:
-        new_avail = Availability(
-            user_id=st.session_state.user_id,
-            free_blocks_json=free_blocks_json,
-            calendar_connected=False
-        )
-        db.add(new_avail)
-    
-    db.commit()
-    st.success("✅ Schedule saved successfully!")
-    st.info("👉 Next: Generate your weekly plan in the **Weekly Plan** page")
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("💾 Save Schedule", type="primary", width="stretch"):
+        free_blocks_json = {"free_blocks": st.session_state.free_blocks}
+        
+        if existing:
+            existing.free_blocks_json = free_blocks_json
+        else:
+            new_avail = Availability(
+                user_id=st.session_state.user_id,
+                free_blocks_json=free_blocks_json,
+                calendar_connected=False
+            )
+            db.add(new_avail)
+        
+        db.commit()
+        st.session_state.schedule_saved = True
+        st.success("✅ Schedule saved successfully!")
+
+with col2:
+    if st.button("Continue to Weekly Plan →", type="primary", width="stretch", key="continue_plan"):
+        st.switch_page("pages/05_weekly_plan.py")
+
+# Add navigation section with proper spacing
+st.write("")  # Add some space
+st.markdown("""
+<div style='background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 10px; text-align: center; margin: 1rem 0;'>
+    <h3 style='margin-bottom: 1rem;'>🎯 Next Step: Weekly Plan</h3>
+    <p style='color: #b8c0cc; margin-bottom: 1rem;'>Get your personalized fitness and nutrition plan</p>
+</div>
+""", unsafe_allow_html=True)
 
 db.close()

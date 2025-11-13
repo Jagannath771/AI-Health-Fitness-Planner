@@ -128,7 +128,7 @@ with col2:
 
 notes = st.text_area("Notes (optional)", value=default_notes, placeholder="How did you feel? Any challenges?")
 
-if st.button("💾 Save Adherence Log", type="primary", use_container_width=True):
+if st.button("💾 Save Adherence Log", type="primary", width="stretch"):
     if existing_log:
         existing_log.workout_done = workout_done
         existing_log.rpe = rpe
