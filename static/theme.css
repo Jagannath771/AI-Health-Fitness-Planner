@@ -100,3 +100,60 @@ a[data-testid^="stPageLink"]::after,
 [data-testid="stPageLink-LeftPart"],
 [data-testid="stPageLink-RightPart"]{display:none!important;}
 ul,ol{list-style:none!important; padding-left:0!important; margin-left:0!important;}
+
+/* -------- Buttons (app-wide, excluding top nav) -------- */
+/* Streamlit renders most buttons as .stButton > button; style them for clarity */
+.stButton > button,
+[data-testid="baseButton-primary"],
+[data-testid="baseButton-secondary"]{
+  background: linear-gradient(180deg, var(--brand), #109a79) !important;
+  color:#fff !important;
+  border:1px solid rgba(255,255,255,.14) !important;
+  border-radius:10px !important;
+  padding:.65rem 1rem !important;
+  font-weight:600 !important;
+  box-shadow:0 6px 16px rgba(20,176,143,.30) !important;
+}
+.stButton > button:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 24px rgba(20,176,143,.35) !important;
+}
+.stButton > button:disabled{
+  background:rgba(255,255,255,.12) !important;
+  color:var(--text-dim) !important;
+  border-color:rgba(255,255,255,.18) !important;
+  box-shadow:none !important;
+}
+
+/* Ensure full-width buttons when requested by code */
+button[data-testid="baseButton-primary"],
+button[data-testid="baseButton-secondary"]{
+  width:100%;
+}
+
+/* Form submit buttons can use a different wrapper; ensure they get the same style */
+[data-testid="stForm"] .stButton > button,
+[data-testid="stForm"] button,
+.stForm button{
+  background: linear-gradient(180deg, var(--brand), #109a79) !important;
+  color:#fff !important;
+  border:1px solid rgba(255,255,255,.14) !important;
+  border-radius:10px !important;
+  padding:.65rem 1rem !important;
+  font-weight:600 !important;
+  box-shadow:0 6px 16px rgba(20,176,143,.30) !important;
+}
+[data-testid="stForm"] .stButton > button:hover,
+[data-testid="stForm"] button:hover,
+.stForm button:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 24px rgba(20,176,143,.35) !important;
+}
+[data-testid="stForm"] .stButton > button:disabled,
+[data-testid="stForm"] button:disabled,
+.stForm button:disabled{
+  background:rgba(255,255,255,.12) !important;
+  color:var(--text-dim) !important;
+  border-color:rgba(255,255,255,.18) !important;
+  box-shadow:none !important;
+}

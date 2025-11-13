@@ -61,20 +61,19 @@ def top_nav(is_authed: bool = False, on_sign_out=None, current: str = ""):
     # Add custom CSS for navigation styling
     st.markdown("""
     <style>
-    .stButton button {
+    /* Scope nav button styles to the top nav only to avoid overriding page buttons */
+    .fl-topnav .stButton button {
         background-color: transparent !important;
         border: none !important;
         padding: 0.5rem 1rem !important;
         color: #ffffff !important;
         font-size: 0.9rem !important;
     }
-    .stButton button:hover {
+    .fl-topnav .stButton button:hover {
         background-color: rgba(255, 255, 255, 0.1) !important;
         border-radius: 4px !important;
     }
-    div[data-testid="stToolbar"] {
-        visibility: hidden;
-    }
+    div[data-testid="stToolbar"] { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -88,7 +87,7 @@ def top_nav(is_authed: bool = False, on_sign_out=None, current: str = ""):
     ]
 
     # Create a single row of navigation
-    st.markdown('<div style="background: rgba(15,17,23,.95); padding: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,.1);">', unsafe_allow_html=True)
+    st.markdown('<div class="fl-topnav" style="background: rgba(15,17,23,.95); padding: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,.1);">', unsafe_allow_html=True)
     
     cols = st.columns(len(items) + (1 if is_authed else 0))
     

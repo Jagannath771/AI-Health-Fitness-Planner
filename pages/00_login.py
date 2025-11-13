@@ -14,7 +14,10 @@ with tab1:
     with st.form("login_form"):
         email = st.text_input("Email", placeholder="your@email.com")
         password = st.text_input("Password", type="password")
-        login_button = st.form_submit_button("Login", width="stretch")
+        # Make the submit button prominent and full-width
+        login_button = st.form_submit_button(
+            "Login", type="primary", use_container_width=True
+        )
         
         if login_button:
             if not email or not password:
@@ -41,7 +44,9 @@ with tab2:
         new_password = st.text_input("Password", type="password", key="signup_password")
         confirm_password = st.text_input("Confirm Password", type="password", key="confirm_password")
         timezone = st.selectbox("Timezone", ["UTC", "EST", "PST", "CST", "MST"], key="signup_timezone")
-        signup_button = st.form_submit_button("Create Account", width="stretch")
+        signup_button = st.form_submit_button(
+            "Create Account", type="primary", use_container_width=True
+        )
         
         if signup_button:
             if not new_email or not new_password or not confirm_password:
@@ -67,7 +72,7 @@ with tab2:
 # Demo mode option
 st.markdown("---")
 st.markdown("### Demo Mode")
-if st.button("Continue as Demo User", width="stretch"):
+if st.button("Continue as Demo User", use_container_width=True):
     st.session_state.user_id = "demo_user"
     st.session_state.email = "demo@example.com"
     st.session_state.timezone = "UTC"
